@@ -1,0 +1,27 @@
+# ── LLM 配置文件（示例） ──
+# 复制此文件为 config.yaml 并填入实际 API Key
+# cp config.example.yaml config.yaml
+
+# ── OpenAI 兼容格式（/v1/chat/completions） ──
+openai:
+  base_url: "https://api.deepseek.com"
+  api_key: "sk-your-api-key-here" # ← 替换为实际密钥
+  model: "deepseek-v4-flash"
+  timeout: 60
+  default_params:
+    temperature: 0.7
+    max_tokens: 2048
+    top_p: 0.95
+  system_prompt: "你是一个有用的AI助手。"
+
+# ── Anthropic 兼容格式（/v1/messages） ──
+anthropic:
+  base_url: "https://api.deepseek.com"
+  api_key: "sk-your-api-key-here" # ← 替换为实际密钥
+  model: "deepseek-v4-flash"
+  timeout: 60
+  default_params:
+    temperature: 0.7
+    max_tokens: 2048
+    top_p: 0.95
+  system_prompt: "你是一个有用的AI助手。"
