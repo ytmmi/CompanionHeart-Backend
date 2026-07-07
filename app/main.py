@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.tts import router as tts_router
+from app.api.llm import router as llm_router
 
 # ── 日志配置 ──
 logging.basicConfig(
@@ -39,6 +40,7 @@ app.add_middleware(
 
 # ── 注册路由 ──
 app.include_router(tts_router)
+app.include_router(llm_router)
 
 
 # ── 健康检查 ──
@@ -56,4 +58,5 @@ async def service_state():
         "status": "running",
         "version": "0.1.0",
         "tts_available": True,
+        "llm_available": True,
     }

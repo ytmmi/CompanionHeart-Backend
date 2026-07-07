@@ -3,7 +3,7 @@
 # cp config.example.yaml config.yaml
 
 # 当前使用的模式: local / api / edge
-mode: "local"
+mode: "edge"
 
 # ── 本地模式（直接使用 genie_tts 库） ──
 local:
