@@ -6,6 +6,7 @@ from typing import Optional
 from .base import TTSBase
 from .edge_tts import EdgeTTS
 from .genie_tts import GenieTTS
+from .plugin_client import TTSPluginClient
 
 
 class TTSFactory:
@@ -67,9 +68,10 @@ class TTSFactory:
 
         配置格式（对应 configs/tts/config.yaml）:
             {
-                "mode": "edge" / "local",
+                "mode": "edge" / "local" / "plugin",
                 "edge": { ... },       # Edge-TTS 配置
                 "local": { ... },      # Genie-TTS 配置
+                "plugin": { ... },     # 插件配置
             }
 
         Args:
@@ -85,8 +87,10 @@ class TTSFactory:
             return TTSFactory._create_edge_from_config(provider_config)
         if mode == "local":
             return TTSFactory._create_local_from_config(provider_config)
+        if mode == "plugin":
+            return TTSFactory._create_plugin_from_config(provider_config)
 
-        raise ValueError(f"不支持的 TTS 模式: {mode}。当前支持: edge, local")
+        raise ValueError(f"不支持的 TTS 模式: {mode}。当前支持: edge, local, plugin")
 
     @staticmethod
     def _create_edge_from_config(config: dict) -> EdgeTTS:
@@ -125,4 +129,18 @@ class TTSFactory:
             output_dir=Path(output_dir) if output_dir else None,
             characters=characters,
             default_params=default_params,
+        )
+
+    @staticmethod
+    def _create_plugin_from_config(config: dict) -> TTSPluginClient:
+        """从配置创建插件客户端实例"""
+        port = config.get("port", 8100)
+        base_url = f"http://localhost:{port}"
+        timeout = config.get("timeout", 120)
+        plugin_config = config.get("config", {})
+
+        return TTSPluginClient(
+            base_url=base_url,
+            timeout=timeout,
+            plugin_config=plugin_config,
         )

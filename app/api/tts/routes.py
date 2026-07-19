@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.tts import TTSBase, TTSFactory, GenieTTS
+from app.tts import TTSBase, TTSFactory
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,7 @@ class TTSRequest(BaseModel):
 
     # GenieTTS 参数
     character_name: Optional[str] = Field(None, description="GenieTTS: 角色名称（如 mika / feibi / thirtyseven）")
+    emotion: Optional[str] = Field(None, description="GenieTTS插件: 情感（对应角色 prompt_wav.json 中的键，如 Normal / Sad）")
     split_sentence: Optional[bool] = Field(None, description="GenieTTS: 是否按分句合成")
 
 
@@ -56,6 +57,7 @@ class VoiceInfo(BaseModel):
     voice: str = Field(..., description="语音标识")
     language: str = Field(..., description="语言代码")
     description: str = Field(..., description="描述")
+    emotions: list[str] = Field(default_factory=list, description="可用情感列表（仅插件角色）")
 
 
 class VoicesResponse(BaseModel):
@@ -69,6 +71,7 @@ class TTSStatus(BaseModel):
     engine: str = Field(..., description="引擎类型")
     voices_count: int = Field(..., description="可用语音数")
     streaming_supported: bool = Field(..., description="是否支持流式")
+    sentence_stream_supported: bool = Field(False, description="是否支持句子级同步流式")
 
 
 # ── 依赖注入 ──
@@ -96,7 +99,7 @@ def _build_engine_kwargs(request: TTSRequest) -> dict:
     自动传递非 None 的参数，与引擎无关。
     """
     kwargs: dict = {"text": request.text}
-    for field in ("voice", "rate", "volume", "pitch", "character_name", "split_sentence"):
+    for field in ("voice", "rate", "volume", "pitch", "character_name", "emotion", "split_sentence"):
         val = getattr(request, field, None)
         if val is not None:
             kwargs[field] = val
@@ -143,7 +146,12 @@ async def list_voices(
         engine_type = type(tts).__name__
         return VoicesResponse(
             voices=[
-                VoiceInfo(voice=v["voice"], language=v["language"], description=v["description"])
+                VoiceInfo(
+                    voice=v["voice"],
+                    language=v["language"],
+                    description=v["description"],
+                    emotions=v.get("emotions", []),
+                )
                 for v in voices
             ],
             engine=engine_type,
@@ -164,7 +172,8 @@ async def tts_status(
         return TTSStatus(
             engine=engine_type,
             voices_count=len(voices),
-            streaming_supported=True,
+            streaming_supported=tts.supports_streaming,
+            sentence_stream_supported=tts.supports_sentence_stream,
         )
     except Exception as e:
         logger.error("获取 TTS 状态失败: %s", e)
@@ -189,12 +198,8 @@ async def synthesize(
         text = kwargs.pop("text")
         audio_data = await tts.synthesize(text=text, **kwargs)
 
-        if isinstance(tts, GenieTTS):
-            media_type = "audio/wav"
-            filename = "tts_output.wav"
-        else:
-            media_type = "audio/mpeg"
-            filename = "tts_output.mp3"
+        media_type = tts.media_type
+        filename = "tts_output.mp3" if media_type == "audio/mpeg" else "tts_output.wav"
 
         return Response(
             content=audio_data,
@@ -222,29 +227,32 @@ async def synthesize_stream(
     """
     语音合成 — 流式（逐 chunk 返回音频数据）。
 
-    EdgeTTS 逐 chunk 返回 MP3，GenieTTS 使用 tts_async 逐 chunk 返回 WAV。
+    EdgeTTS 逐 chunk 返回 MP3；GenieTTS 插件返回 WAV 头 + 逐句 PCM。
     适用于实时播放场景（如与 LLM 流式输出联动）。
+    引擎不支持真流式时（supports_streaming=False），内部回退为
+    完整合成后一次性返回（响应头 X-Streaming: false 标识）。
     """
     try:
         kwargs = _build_engine_kwargs(request)
         text = kwargs.pop("text")
 
-        if isinstance(tts, GenieTTS):
-            media_type = "audio/wav"
+        if tts.supports_streaming:
+            async def audio_stream():
+                async for chunk in tts.stream(text=text, **kwargs):
+                    yield chunk
         else:
-            media_type = "audio/mpeg"
-
-        async def audio_stream():
-            async for chunk in tts.stream(text=text, **kwargs):
-                yield chunk
+            # 引擎不支持流式：完整合成后一次性产出
+            async def audio_stream():
+                yield await tts.synthesize(text=text, **kwargs)
 
         return StreamingResponse(
             content=audio_stream(),
-            media_type=media_type,
+            media_type=tts.media_type,
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "X-Engine-Type": type(tts).__name__,
+                "X-Streaming": "true" if tts.supports_streaming else "false",
             },
         )
     except ImportError as e:
@@ -253,3 +261,50 @@ async def synthesize_stream(
     except Exception as e:
         logger.error("流式语音合成失败: %s", e)
         raise HTTPException(status_code=500, detail=f"流式语音合成失败: {e}")
+
+
+# ── 句子级同步流式合成：文本与音频成对返回（NDJSON） ──
+
+@router.post("/stream/sentences")
+async def synthesize_stream_sentences(
+    request: TTSRequest,
+    tts: TTSBase = Depends(get_tts_engine),
+):
+    """
+    句子级同步流式合成（NDJSON）。
+
+    每行一个 JSON 对象:
+        {"text": 句子, "audio": base64(16-bit PCM @32kHz 单声道), "duration_ms": 时长}
+
+    文本与其音频成对到达，前端可实现严格的语音-文字同步
+    （播放某句音频时按该句 duration_ms 揭示对应文字）。
+    仅句子级流式引擎支持（GenieTTS 插件）；不支持时返回 501，
+    调用方应回退到 /stream 或非流式端点。
+    """
+    if not tts.supports_sentence_stream:
+        raise HTTPException(
+            status_code=501,
+            detail=f"当前 TTS 引擎 {type(tts).__name__} 不支持句子级同步流式，请使用 /stream 或非流式端点",
+        )
+    try:
+        kwargs = _build_engine_kwargs(request)
+        text = kwargs.pop("text")
+        # 分句策略由句子级端点自身决定
+        kwargs.pop("split_sentence", None)
+
+        async def ndjson_stream():
+            async for chunk in tts.stream_sentences(text=text, **kwargs):
+                yield chunk
+
+        return StreamingResponse(
+            content=ndjson_stream(),
+            media_type="application/x-ndjson",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Engine-Type": type(tts).__name__,
+            },
+        )
+    except Exception as e:
+        logger.error("句子级流式语音合成失败: %s", e)
+        raise HTTPException(status_code=500, detail=f"句子级流式语音合成失败: {e}")

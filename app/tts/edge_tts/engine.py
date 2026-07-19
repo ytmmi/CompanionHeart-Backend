@@ -41,6 +41,8 @@ DEFAULT_VOICES: dict[str, dict] = {
 class EdgeTTS(TTSBase):
     """Edge-TTS 语音合成引擎"""
 
+    media_type = "audio/mpeg"
+
     def __init__(
         self,
         voice: str = "zh-CN-XiaoxiaoNeural",
@@ -110,6 +112,7 @@ class EdgeTTS(TTSBase):
         rate: Optional[str] = None,
         volume: Optional[str] = None,
         pitch: Optional[str] = None,
+        **kwargs,
     ) -> bytes:
         """
         将文本合成为 MP3 音频。
@@ -161,6 +164,7 @@ class EdgeTTS(TTSBase):
         rate: Optional[str] = None,
         volume: Optional[str] = None,
         pitch: Optional[str] = None,
+        **kwargs,
     ) -> AsyncIterator[bytes]:
         """
         流式合成语音，逐 chunk 产生 MP3 音频数据。
