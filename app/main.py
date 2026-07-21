@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.tts import router as tts_router
 from app.api.llm import router as llm_router
+from app.api.conversations import router as conversations_router
 from app.plugins.manager import PluginManager
 
 # ── 日志配置 ──
@@ -46,6 +47,7 @@ app.add_middleware(
 # ── 注册路由 ──
 app.include_router(tts_router)
 app.include_router(llm_router)
+app.include_router(conversations_router)
 
 
 # ── 健康检查 ──

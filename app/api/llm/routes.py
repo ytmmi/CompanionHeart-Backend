@@ -6,6 +6,12 @@
     POST   /api/llm/chat         — 非流式对话（返回完整回复文本）
     POST   /api/llm/chat/stream  — 流式对话（SSE，逐 chunk 返回文本）
 
+对话模式（chat / chat/stream 均支持，二选一）:
+    - 无状态模式: 传 messages，多轮上下文由调用方维护（兼容旧调用）
+    - 会话模式:   传 conversation_id + text，上下文由后端短期记忆
+                （app.memory.short_term）组装，用户消息与回复自动持久化
+                会话生命周期管理见 /api/conversations（app/api/conversations）
+
 支持的 LLM 引擎:
     - openai:  OpenAI 兼容格式（DeepSeek / OpenAI / 任何兼容 API）
              参数: model, temperature, max_tokens, top_p, system_prompt
@@ -27,6 +33,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.llm import LLMBase, LLMFactory
+from app.memory.short_term import get_conversation_store
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +50,22 @@ class Message(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """对话请求"""
-    messages: list[Message] = Field(
-        ..., min_length=1, max_length=100,
-        description="对话消息列表（支持多轮上下文）",
+    """对话请求 — 两种模式（二选一）：
+
+    1. 无状态模式：传 messages（完整对话历史），后端不存储 — 兼容旧调用
+    2. 会话模式：传 conversation_id + text，后端从短期记忆组装上下文，
+       并自动把用户消息与模型回复写入会话存储
+    """
+    messages: Optional[list[Message]] = Field(
+        None, min_length=1, max_length=100,
+        description="无状态模式：对话消息列表（支持多轮上下文）",
         examples=[[{"role": "user", "content": "你好"}]],
+    )
+    conversation_id: Optional[str] = Field(
+        None, description="会话模式：会话 ID（由 POST /api/conversations 创建）",
+    )
+    text: Optional[str] = Field(
+        None, min_length=1, description="会话模式：本次用户消息文本",
     )
     model: Optional[str] = Field(None, description="模型名称（覆盖配置中的默认模型）")
     temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="采样温度 0~2")
@@ -61,6 +79,7 @@ class ChatResponse(BaseModel):
     reply: str = Field(..., description="模型回复文本")
     model: str = Field(..., description="使用的模型名称")
     engine: str = Field(..., description="引擎类型")
+    conversation_id: Optional[str] = Field(None, description="会话模式下回传会话 ID")
 
 
 class ModelInfo(BaseModel):
@@ -143,6 +162,38 @@ def _get_engine_type(engine: LLMBase) -> str:
     return type(engine).__name__.replace("LLM", "").lower()
 
 
+def _resolve_messages(request: ChatRequest) -> list[dict]:
+    """
+    解析本次调用的消息列表（两种模式二选一）：
+
+    - 会话模式（conversation_id + text）：把用户消息写入会话存储，
+      再从存储组装最近上下文（后端负责截断）
+    - 无状态模式（messages）：直接使用请求携带的消息列表
+
+    参数不合法时抛 HTTPException 400/404。
+    """
+    if request.conversation_id is not None:
+        if not request.text:
+            raise HTTPException(status_code=400, detail="会话模式必须提供 text")
+        store = get_conversation_store()
+        if store.append_message(request.conversation_id, "user", request.text) is None:
+            raise HTTPException(
+                status_code=404, detail=f"对话不存在: {request.conversation_id}")
+        return store.build_context(request.conversation_id)
+
+    if not request.messages:
+        raise HTTPException(
+            status_code=400, detail="必须提供 messages（无状态模式）或 conversation_id + text（会话模式）")
+    return [{"role": m.role, "content": m.content} for m in request.messages]
+
+
+def _save_reply(request: ChatRequest, reply: str) -> None:
+    """会话模式下把模型回复写回会话存储（无状态模式为 no-op）"""
+    if request.conversation_id is not None and reply:
+        get_conversation_store().append_message(
+            request.conversation_id, "assistant", reply)
+
+
 def _build_chat_kwargs(request: ChatRequest, engine: LLMBase) -> dict:
     """
     根据请求参数构建引擎调用参数。
@@ -166,8 +217,9 @@ def _build_chat_kwargs(request: ChatRequest, engine: LLMBase) -> dict:
     if param_overrides:
         kwargs.update(param_overrides)
 
+    # 解析消息（会话模式 / 无状态模式）
+    messages = _resolve_messages(request)
     # 临时 system prompt 覆盖
-    messages = [{"role": m.role, "content": m.content} for m in request.messages]
     if request.system_prompt is not None:
         # 替换或添加 system prompt
         messages = [m for m in messages if m["role"] != "system"]
@@ -236,7 +288,9 @@ async def chat(
     """
     非流式对话 — 发送消息列表，返回完整回复文本。
 
-    支持多轮上下文（messages 中传入多轮对话历史）。
+    两种模式：
+    - 无状态：传 messages（多轮上下文由调用方维护）
+    - 会话：传 conversation_id + text（上下文由后端短期记忆组装并自动保存）
     可通过参数覆盖临时调整 temperature / max_tokens / top_p。
     可通过 system_prompt 临时覆盖系统提示词。
     """
@@ -245,6 +299,7 @@ async def chat(
         messages = kwargs.pop("messages")
 
         reply = await engine.chat(messages=messages, **kwargs)
+        _save_reply(request, reply)
 
         logger.info("LLM 对话成功: model=%s, messages=%d, reply_len=%d",
                     engine.model, len(messages), len(reply))
@@ -253,7 +308,10 @@ async def chat(
             reply=reply,
             model=engine.model,
             engine=_get_engine_type(engine),
+            conversation_id=request.conversation_id,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("LLM 对话失败: %s", e)
         raise HTTPException(status_code=500, detail=f"LLM 对话失败: {e}")
@@ -273,6 +331,7 @@ async def chat_stream(
     结束标志: `data: [DONE]\n\n`
 
     适用于实时显示 LLM 输出的场景（如打字机效果）。
+    会话模式（conversation_id + text）下，完整回复在流结束后自动写回会话存储。
     """
     try:
         kwargs = _build_chat_kwargs(request, engine)
@@ -285,11 +344,14 @@ async def chat_stream(
                     full_reply.append(chunk)
                     yield f"data: {json.dumps({'content': chunk, 'model': engine.model, 'engine': _get_engine_type(engine)}, ensure_ascii=False)}\n\n"
 
+                _save_reply(request, "".join(full_reply))
                 yield "data: [DONE]\n\n"
                 logger.info("LLM 流式对话完成: model=%s, messages=%d, reply_len=%d",
                             engine.model, len(messages), sum(len(c) for c in full_reply))
             except Exception as e:
                 logger.error("LLM 流式对话中断: %s", e)
+                # 中断时已生成的部分回复也写回会话，保持上下文连贯
+                _save_reply(request, "".join(full_reply))
                 yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
 
@@ -304,6 +366,8 @@ async def chat_stream(
                 "X-Model": engine.model,
             },
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("LLM 流式对话启动失败: %s", e)
         raise HTTPException(status_code=500, detail=f"LLM 流式对话失败: {e}")
