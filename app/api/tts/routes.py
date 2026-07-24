@@ -3,8 +3,14 @@
 端点:
     GET    /api/voice/tts/voices       — 获取可用语音/角色列表
     GET    /api/voice/tts/status        — 获取 TTS 引擎状态
+    GET    /api/voice/tts/enabled      — 查询 TTS 是否启用
+    POST   /api/voice/tts/enabled      — 设置 TTS 启用/禁用（前端控制）
     POST   /api/voice/tts              — 语音合成（非流式，返回完整音频文件）
     POST   /api/voice/tts/stream       — 流式语音合成（逐 chunk 返回音频数据）
+
+TTS 启用开关:
+    前端通过 POST /enabled 控制；禁用时所有合成端点返回 403，
+    不路由到 TTS 引擎（前端应回退为纯文字显示）。
 
 支持的 TTS 引擎:
     - edge:  微软 Edge-TTS（在线，免费）
@@ -72,6 +78,27 @@ class TTSStatus(BaseModel):
     voices_count: int = Field(..., description="可用语音数")
     streaming_supported: bool = Field(..., description="是否支持流式")
     sentence_stream_supported: bool = Field(False, description="是否支持句子级同步流式")
+
+
+class TTSEnabledRequest(BaseModel):
+    """TTS 启用/禁用请求"""
+    enabled: bool = Field(..., description="是否启用 TTS")
+
+
+class TTSEnabledResponse(BaseModel):
+    """TTS 启用状态响应"""
+    enabled: bool = Field(..., description="TTS 当前是否启用")
+
+
+# ── TTS 启用开关（前端控制；禁用时合成端点不路由到引擎） ──
+
+_tts_enabled: bool = True
+
+
+def _require_tts_enabled() -> None:
+    """TTS 禁用时拒绝合成请求（403）"""
+    if not _tts_enabled:
+        raise HTTPException(status_code=403, detail="TTS 已禁用")
 
 
 # ── 依赖注入 ──
@@ -180,6 +207,23 @@ async def tts_status(
         raise HTTPException(status_code=500, detail=f"获取 TTS 状态失败: {e}")
 
 
+# ── TTS 启用开关端点 ──
+
+@router.get("/enabled", response_model=TTSEnabledResponse)
+async def get_tts_enabled():
+    """查询 TTS 是否启用"""
+    return TTSEnabledResponse(enabled=_tts_enabled)
+
+
+@router.post("/enabled", response_model=TTSEnabledResponse)
+async def set_tts_enabled(request: TTSEnabledRequest):
+    """设置 TTS 启用/禁用（前端控制；禁用后合成端点返回 403）"""
+    global _tts_enabled
+    _tts_enabled = request.enabled
+    logger.info("TTS 启用状态设为: %s", _tts_enabled)
+    return TTSEnabledResponse(enabled=_tts_enabled)
+
+
 # ── 非流式合成：返回完整音频文件 ──
 
 @router.post("")
@@ -192,7 +236,9 @@ async def synthesize(
 
     EdgeTTS 返回 MP3，GenieTTS 返回 WAV。
     引擎无关的参数自动传递，无关参数自动忽略。
+    TTS 禁用时返回 403，不路由到引擎。
     """
+    _require_tts_enabled()
     try:
         kwargs = _build_engine_kwargs(request)
         text = kwargs.pop("text")
@@ -231,7 +277,9 @@ async def synthesize_stream(
     适用于实时播放场景（如与 LLM 流式输出联动）。
     引擎不支持真流式时（supports_streaming=False），内部回退为
     完整合成后一次性返回（响应头 X-Streaming: false 标识）。
+    TTS 禁用时返回 403，不路由到引擎。
     """
+    _require_tts_enabled()
     try:
         kwargs = _build_engine_kwargs(request)
         text = kwargs.pop("text")
@@ -280,7 +328,9 @@ async def synthesize_stream_sentences(
     （播放某句音频时按该句 duration_ms 揭示对应文字）。
     仅句子级流式引擎支持（GenieTTS 插件）；不支持时返回 501，
     调用方应回退到 /stream 或非流式端点。
+    TTS 禁用时返回 403，不路由到引擎。
     """
+    _require_tts_enabled()
     if not tts.supports_sentence_stream:
         raise HTTPException(
             status_code=501,
