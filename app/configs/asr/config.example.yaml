@@ -1,0 +1,24 @@
+# ── ASR 配置文件 ──
+# 路径: app/configs/asr/config.yaml
+# 说明: 定义 ASR 语音识别参数
+#       - plugin: 插件模式（FunASR + SenseVoiceSmall 本地推理，独立进程 HTTP 服务）
+
+# 当前使用的模式: plugin
+mode: "plugin"
+
+# ── 是否随后端启动 ASR 插件 ──
+# 注意: 模型加载约需 10 秒，启用会拖慢后端启动
+enabled: false
+
+# ── 插件模式（本地模型通过独立进程提供 HTTP 服务） ──
+plugin:
+  # 插件名（custom_plugin/ 下的目录名）
+  name: "ASR_funasr"
+  base_url: "http://localhost:8400"
+  timeout: 120
+
+  # ── 以下为随请求下发的默认参数 ──
+  # 语言: auto（自动检测）/ zh / en / yue（粤语）/ ja / ko
+  language: "auto"
+  # 逆文本标准化（数字、日期等转为书写形式）
+  use_itn: true

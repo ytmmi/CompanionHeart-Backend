@@ -31,6 +31,7 @@ class PluginManager:
         self.plugin_dir = plugin_dir
         self.plugins: dict[str, Plugin] = {}
         self.processes: dict[str, subprocess.Popen] = {}
+        self._log_files: dict[str, object] = {}  # 插件日志文件句柄（进程退出时关闭）
 
     def scan_plugins(self) -> list[Plugin]:
         """
@@ -64,13 +65,19 @@ class PluginManager:
 
         return plugins
 
-    def start_plugin(self, plugin_name: str, wait_timeout: int = 10) -> bool:
+    def start_plugin(
+        self,
+        plugin_name: str,
+        wait_timeout: int = 10,
+        env: Optional[dict[str, str]] = None,
+    ) -> bool:
         """
         启动插件HTTP服务（子进程）。
 
         Args:
             plugin_name: 插件名称
             wait_timeout: 等待健康检查的超时时间（秒）
+            env: 附加环境变量（叠加在当前进程环境之上，如 agent 插件的 LLM 配置）
 
         Returns:
             True 表示启动成功，False 表示失败
@@ -80,11 +87,17 @@ class PluginManager:
             return False
 
         plugin = self.plugins[plugin_name]
-        server_script = plugin.path / "server.py"
 
-        if not server_script.exists():
-            logger.error("插件服务脚本不存在: %s", server_script)
-            return False
+        # 启动命令：plugin.yaml 的 service.command 优先，缺省回退 python server.py
+        if plugin.service.command:
+            cmd = [*plugin.service.command, "--port", str(plugin.service.port)]
+        else:
+            server_script = plugin.path / "server.py"
+            if not server_script.exists():
+                logger.error("插件服务脚本不存在: %s", server_script)
+                return False
+            # 使用项目虚拟环境的Python
+            cmd = [sys.executable, str(server_script), "--port", str(plugin.service.port)]
 
         # 检查端口是否已占用
         if self._is_port_in_use(plugin.service.port):
@@ -97,17 +110,25 @@ class PluginManager:
 
         # 启动子进程
         try:
-            # 使用项目虚拟环境的Python
-            python_exe = sys.executable
-
             logger.info("启动插件: %s (端口 %d)", plugin_name, plugin.service.port)
+            proc_env = None
+            if env:
+                import os
+                proc_env = {**os.environ, **env}
+            # 子进程输出落日志文件（不能用 PIPE：无人读取时缓冲区写满会
+            # 阻塞子进程 —— Genie 模型加载日志量大，曾导致插件整体卡死）
+            log_dir = self.plugin_dir / ".logs"
+            log_dir.mkdir(exist_ok=True)
+            log_file = open(log_dir / f"{plugin_name}.log", "a", encoding="utf-8", errors="replace")
             proc = subprocess.Popen(
-                [python_exe, str(server_script), "--port", str(plugin.service.port)],
+                cmd,
                 cwd=str(plugin.path),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
                 text=True,
+                env=proc_env,
             )
+            self._log_files[plugin_name] = log_file
             self.processes[plugin_name] = proc
 
             # 等待健康检查通过
@@ -153,6 +174,12 @@ class PluginManager:
             return False
         finally:
             del self.processes[plugin_name]
+            log_file = self._log_files.pop(plugin_name, None)
+            if log_file is not None:
+                try:
+                    log_file.close()
+                except Exception:
+                    pass
 
         return True
 

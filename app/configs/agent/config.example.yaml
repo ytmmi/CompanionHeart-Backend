@@ -1,0 +1,26 @@
+# ── Agent 配置文件 ──
+# 路径: app/configs/agent/config.yaml
+# 说明: Agent 引擎（pi-agent-core sidecar）配置
+#       LLM 端点/密钥不在此配置 —— 单一真源为 app/configs/llm/config.yaml，
+#       后端启动 sidecar 时自动翻译为环境变量注入
+
+# ── 当前激活的引擎模式 ──
+# 可选: pi_sidecar / basic(预留)
+mode: "pi_sidecar"
+
+# ── 是否随后端启动 sidecar 插件 ──
+enabled: true
+
+# ── pi sidecar 引擎 ──
+pi_sidecar:
+  # sidecar 插件名（custom_plugin/ 下的目录名）
+  plugin_name: "AGENT_pi"
+  base_url: "http://localhost:8300"
+  timeout: 120
+  default_params:
+    temperature: 0.7
+    max_tokens: 2048
+    # 注意: pi-ai 不支持 top_p，配置了也会被忽略
+
+# ── 人格系统提示词（缺省回退 llm/config.yaml 的 system_prompt） ──
+system_prompt: ""

@@ -48,15 +48,17 @@ class PluginHTTPClient:
 
         Args:
             endpoint: API端点（如 /synthesize）
-            json: 请求体JSON
-            **kwargs: 其他httpx参数
+            json: 请求体JSON（与 kwargs 的 files/data 互斥）
+            **kwargs: 其他httpx参数（如 files/data 用于 multipart 上传）
 
         Returns:
             响应对象
         """
         url = f"{self.base_url}{endpoint}"
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            return await client.post(url, json=json, **kwargs)
+            if json is not None:
+                return await client.post(url, json=json, **kwargs)
+            return await client.post(url, **kwargs)
 
     async def get(self, endpoint: str, **kwargs) -> httpx.Response:
         """

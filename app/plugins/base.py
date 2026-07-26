@@ -11,6 +11,8 @@ class PluginServiceConfig:
     port: int
     health_check: str = "/health"
     protocol: str = "http"
+    # 启动命令（相对插件目录执行；None 时回退默认 python server.py --port X）
+    command: Optional[list[str]] = None
 
 
 @dataclass
@@ -19,9 +21,13 @@ class PluginAPIConfig:
     synthesize: Optional[str] = None  # TTS
     stream: Optional[str] = None  # TTS
     voices: Optional[str] = None  # TTS
-    chat: Optional[str] = None  # LLM
-    chat_stream: Optional[str] = None  # LLM
+    chat: Optional[str] = None  # LLM / Agent
+    chat_stream: Optional[str] = None  # LLM / Agent
     models: Optional[str] = None  # LLM
+    info: Optional[str] = None  # Agent
+    abort: Optional[str] = None  # Agent
+    transcribe: Optional[str] = None  # ASR
+    languages: Optional[str] = None  # ASR
 
 
 @dataclass
@@ -60,6 +66,7 @@ class Plugin:
                 port=service_data["port"],
                 health_check=service_data.get("health_check", "/health"),
                 protocol=service_data.get("protocol", "http"),
+                command=service_data.get("command"),
             ),
             api=PluginAPIConfig(
                 synthesize=api_data.get("synthesize"),
@@ -68,6 +75,10 @@ class Plugin:
                 chat=api_data.get("chat"),
                 chat_stream=api_data.get("chat_stream"),
                 models=api_data.get("models"),
+                info=api_data.get("info"),
+                abort=api_data.get("abort"),
+                transcribe=api_data.get("transcribe"),
+                languages=api_data.get("languages"),
             ),
             dependencies=data.get("dependencies", []),
             repository=data.get("repository"),
