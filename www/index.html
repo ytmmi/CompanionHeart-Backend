@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CompanionHeart 设置</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14'>&#9829;</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ══ 头部 ══ -->
+<header class="header">
+  <div class="header-main">
+    <span class="logo">CompanionHeart</span>
+    <span class="subtitle">后端设置面板</span>
+  </div>
+
+  <!-- 服务状态灯 -->
+  <div class="status-bar" id="statusBar"></div>
+
+  <div class="header-actions">
+    <div class="view-toggle" id="viewToggle">
+      <button class="vt-btn active" data-view="simple">简单</button>
+      <button class="vt-btn" data-view="advanced">高级</button>
+      <button class="vt-btn" data-view="plugins">插件</button>
+    </div>
+    <button class="icon-btn" id="themeBtn" title="切换深色 / 浅色">◐</button>
+  </div>
+</header>
+
+<!-- ══ 简单视图 ══ -->
+<main class="container view" id="viewSimple">
+  <div class="loading" id="schemaLoading">加载配置中…</div>
+  <div id="groups"></div>
+</main>
+
+<!-- ══ 高级视图 ══ -->
+<main class="container view hidden" id="viewAdvanced">
+  <div class="adv-note">
+    高级视图直接编辑 4 个 config.yaml 的每一个 key。保存走同一套注释保留写入器，
+    但这里不做取值校验 —— 改错了后端可能起不来。
+  </div>
+
+  <div class="search-box">
+    <span class="icon">&#128269;</span>
+    <input type="text" id="searchInput" placeholder="搜索设置项（模糊匹配 key 或描述）…">
+  </div>
+  <div class="result-count" id="resultCount"></div>
+
+  <div id="allKeysBody"><div class="loading">加载中…</div></div>
+</main>
+
+<!-- ══ 插件管理视图 ══ -->
+<main class="container view hidden" id="viewPlugins">
+  <!-- 安装面板 -->
+  <div class="install-panel">
+    <div class="install-head">
+      <span class="ip-title">安装插件</span>
+      <div class="install-tabs" id="installTabs">
+        <button class="it-btn active" data-src="git">从 Git</button>
+        <button class="it-btn" data-src="local">从本地目录</button>
+      </div>
+    </div>
+
+    <div class="install-warn">
+      ⚠ 安装会 <b>git clone</b> 后对第三方代码执行 <b>pip install -r requirements.txt</b>，
+      装进项目共享 venv —— 等同运行未审计的第三方代码。只安装你信任来源的插件。
+    </div>
+
+    <!-- Git 表单 -->
+    <div class="install-form" id="formGit">
+      <div class="if-row">
+        <label>Git 地址</label>
+        <input type="text" id="gitUrl" placeholder="https://github.com/user/TTS_xxx.git">
+      </div>
+      <div class="if-row">
+        <label>分支</label>
+        <input type="text" id="gitBranch" placeholder="main" value="main" class="short">
+        <label class="ml">目录名</label>
+        <input type="text" id="gitName" placeholder="留空则用仓库名" class="short">
+      </div>
+    </div>
+
+    <!-- 本地表单 -->
+    <div class="install-form hidden" id="formLocal">
+      <div class="if-row">
+        <label>本地路径</label>
+        <input type="text" id="localPath" placeholder="E:\\path\\to\\plugin_dir（该目录需含 plugin.yaml）">
+      </div>
+    </div>
+
+    <div class="install-actions">
+      <label class="risk-ack">
+        <input type="checkbox" id="riskAck">
+        我了解风险，确认这是可信来源
+      </label>
+      <button class="btn primary" id="installBtn" disabled>安装</button>
+    </div>
+  </div>
+
+  <div class="loading" id="pluginsLoading">加载插件中…</div>
+  <div id="pluginList"></div>
+</main>
+
+<!-- ══ 任务控制台（安装 / 启动流式日志） ══ -->
+<div class="job-console hidden" id="jobConsole">
+  <div class="jc-panel">
+    <div class="jc-head">
+      <span id="jcTitle">任务进行中</span>
+      <span class="jc-status" id="jcStatus"></span>
+      <button class="icon-btn" id="jcClose" title="关闭">✕</button>
+    </div>
+    <pre class="jc-body" id="jcBody"></pre>
+    <div class="jc-foot" id="jcFoot"></div>
+  </div>
+</div>
+
+<!-- ══ 插件日志查看 ══ -->
+<div class="log-viewer hidden" id="logViewer">
+  <div class="lv-panel">
+    <div class="lv-head">
+      <span id="lvTitle">插件日志</span>
+      <button class="btn ghost sm" id="lvRefresh">刷新</button>
+      <button class="icon-btn" id="lvClose">✕</button>
+    </div>
+    <pre class="lv-body" id="lvBody"></pre>
+  </div>
+</div>
+
+<!-- ══ 备份 / 恢复 ══ -->
+<div class="backup-drawer hidden" id="backupDrawer">
+  <div class="bd-panel">
+    <div class="bd-head">
+      <span id="bdTitle">备份与恢复</span>
+      <button class="icon-btn" id="bdClose">✕</button>
+    </div>
+    <div class="bd-body" id="bdBody"></div>
+  </div>
+</div>
+
+<!-- ══ 未保存改动条 ══ -->
+<div class="dirty-bar hidden" id="dirtyBar">
+  <span class="db-count" id="dirtyCount"></span>
+  <span class="db-hint" id="dirtyHint"></span>
+  <button class="btn ghost" id="revertBtn">撤销</button>
+  <button class="btn primary" id="saveBtn">保存</button>
+</div>
+
+<div id="toastHost"></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
