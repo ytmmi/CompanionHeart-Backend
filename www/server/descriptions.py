@@ -6,7 +6,7 @@ from __future__ import annotations
 
 KEY_DESCRIPTIONS = {
     # ── LLM ──
-    "llm.mode": "当前激活的 LLM 引擎模式（openai / ollama）",
+    "llm.mode": "当前激活的 LLM 引擎模式（openai / ollama / claude）",
     "llm.openai.base_url": "OpenAI 兼容 API 端点地址",
     "llm.openai.api_key": "API 密钥",
     "llm.openai.model": "使用的模型名称",
@@ -22,6 +22,14 @@ KEY_DESCRIPTIONS = {
     "llm.ollama.default_params.max_tokens": "单次回复最大 token 数",
     "llm.ollama.default_params.top_p": "核采样阈值（0~1）",
     "llm.ollama.system_prompt": "系统提示词，定义 AI 角色行为",
+    "llm.claude.api_key": "Anthropic API 密钥",
+    "llm.claude.base_url": "Anthropic API 端点地址（可覆盖为代理/中转地址）",
+    "llm.claude.model": "Claude 模型 ID",
+    "llm.claude.timeout": "请求超时时间（秒）",
+    "llm.claude.default_params.temperature": "生成温度，越高输出越随机（0~2）",
+    "llm.claude.default_params.max_tokens": "单次回复最大 token 数（Anthropic API 必填参数）",
+    "llm.claude.default_params.top_p": "核采样阈值（0~1）",
+    "llm.claude.system_prompt": "系统提示词，定义 AI 角色行为（通过 Anthropic 请求体 system 字段发送）",
 
     # ── Agent ──
     "agent.mode": "Agent 引擎模式（pi_sidecar / basic）",

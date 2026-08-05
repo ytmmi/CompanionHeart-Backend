@@ -77,6 +77,27 @@ def _test_llm() -> dict:
                     "message": f"Ollama 可达，但没有模型 “{want}”。已安装：{', '.join(names) or '（无）'}"}
         return {"ok": True, "message": f"Ollama 正常，模型 “{want}” 已就绪（共 {len(names)} 个模型）"}
 
+    if mode == "claude":
+        base = str(dig(llm, "claude.base_url", "")).rstrip("/")
+        key = str(dig(llm, "claude.api_key", ""))
+        model = str(dig(llm, "claude.model", ""))
+        if not base: return {"ok": False, "message": "Claude API endpoint not set"}
+        if not key: return {"ok": False, "message": "Claude API key not set (sk-ant-...)"}
+        url = base if base.endswith("/v1/messages") else f"{base}/v1/messages"
+        code, text, err = http_request(
+            "POST", url, timeout=20,
+            headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                     "Content-Type": "application/json"},
+            json_body={"model": model, "max_tokens": 1,
+                       "messages": [{"role": "user", "content": "hi"}]},
+        )
+        if err: return {"ok": False, "message": f"Claude request failed ({url}): {err}"}
+        if code == 200: return {"ok": True, "message": f"Claude connected, model {model} OK"}
+        if code == 401: return {"ok": False, "message": "Claude HTTP 401 - invalid API key"}
+        if code == 404: return {"ok": False, "message": f"Claude HTTP 404 - bad endpoint/model ({url})"}
+        snippet = (text or "")[:200].replace("\n", " ")
+        return {"ok": False, "message": f"Claude HTTP {code}: {snippet}"}
+
     # openai 兼容：真发一次 1-token 的 chat，能同时验密钥、端点、模型名
     base = str(dig(llm, "openai.base_url", "")).rstrip("/")
     key = str(dig(llm, "openai.api_key", ""))

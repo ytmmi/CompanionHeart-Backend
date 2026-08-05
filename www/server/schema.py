@@ -47,12 +47,12 @@ def _plugin_options(configured: str, ptype: str) -> list[dict]:
 def _llm_group(llm: dict) -> dict:
     return {
         "id": "llm", "title": "大模型 (LLM)", "badge": "LLM",
-        "hint": "对话推理引擎。仅 openai / ollama 两种模式可用 —— "
-                "claude / gemini / deepseek 引擎在 app/llm/ 下是未实现的占位，选了会启动失败。",
+        "hint": "对话推理引擎。支持 OpenAI 兼容、Ollama 本地推理、Anthropic Claude 三种模式。",
         "fields": [
             _f("llm.mode", "引擎模式", "select", llm.get("mode", "openai"), options=[
-                {"value": "openai", "label": "OpenAI 兼容（OpenAI / DeepSeek / vLLM / LM Studio / 任意兼容端点）"},
+                {"value": "openai", "label": "OpenAI 格式"},
                 {"value": "ollama", "label": "Ollama 本地推理"},
+                {"value": "claude", "label": "Anthropic 格式"},
             ]),
 
             _f("llm.openai.api_key", "API 密钥", "password", dig(llm, "openai.api_key", ""),
@@ -81,6 +81,17 @@ def _llm_group(llm: dict) -> dict:
             _f("llm.ollama.timeout", "请求超时（秒）", "number", dig(llm, "ollama.timeout", 120),
                showIf={"key": "llm.mode", "equals": "ollama"}, min=1, max=600, step=1),
 
+            _f("llm.claude.api_key", "API 密钥", "password", dig(llm, "claude.api_key", ""),
+               showIf={"key": "llm.mode", "equals": "claude"},
+               placeholder="sk-ant-..."),
+            _f("llm.claude.base_url", "API 端点", "text", dig(llm, "claude.base_url", ""),
+               showIf={"key": "llm.mode", "equals": "claude"},
+               placeholder="https://api.anthropic.com"),
+            _f("llm.claude.model", "模型", "model", dig(llm, "claude.model", ""),
+               showIf={"key": "llm.mode", "equals": "claude"}, modelSource="claude"),
+            _f("llm.claude.timeout", "请求超时（秒）", "number", dig(llm, "claude.timeout", 120),
+               showIf={"key": "llm.mode", "equals": "claude"}, min=1, max=600, step=1),
+
             _f("llm.openai.default_params.temperature", "生成温度", "slider",
                dig(llm, "openai.default_params.temperature", 0.7),
                showIf={"key": "llm.mode", "equals": "openai"}, min=0, max=2, step=0.05),
@@ -100,6 +111,16 @@ def _llm_group(llm: dict) -> dict:
             _f("llm.ollama.default_params.top_p", "核采样 top_p", "slider",
                dig(llm, "ollama.default_params.top_p", 0.95),
                showIf={"key": "llm.mode", "equals": "ollama"}, min=0, max=1, step=0.01),
+
+            _f("llm.claude.default_params.temperature", "生成温度", "slider",
+               dig(llm, "claude.default_params.temperature", 0.7),
+               showIf={"key": "llm.mode", "equals": "claude"}, min=0, max=2, step=0.05),
+            _f("llm.claude.default_params.max_tokens", "最大输出 token（必填）", "number",
+               dig(llm, "claude.default_params.max_tokens", 2048),
+               showIf={"key": "llm.mode", "equals": "claude"}, min=1, max=65536, step=1),
+            _f("llm.claude.default_params.top_p", "核采样 top_p", "slider",
+               dig(llm, "claude.default_params.top_p", 0.95),
+               showIf={"key": "llm.mode", "equals": "claude"}, min=0, max=1, step=0.01),
         ],
         "test": "llm",
     }

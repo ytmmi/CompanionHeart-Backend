@@ -5,6 +5,7 @@ from typing import Optional
 from .base import LLMBase
 from .openai_llm import OpenAILLM
 from .ollama import OllamaLLM
+from .claude import ClaudeLLM
 
 
 class LLMFactory:
@@ -57,8 +58,13 @@ class LLMFactory:
             )
 
         if provider == "claude":
-            # Claude 预留 — 待实现
-            raise NotImplementedError("Claude 引擎尚未实现，敬请期待")
+            return ClaudeLLM(
+                api_key=api_key or "",
+                model=model or "claude-sonnet-4-20250514",
+                base_url=base_url or "https://api.anthropic.com",
+                timeout=timeout,
+                **kwargs,
+            )
 
         if provider == "gemini":
             # Gemini 预留 — 待实现
@@ -99,8 +105,10 @@ class LLMFactory:
             return LLMFactory._create_openai_from_config(provider_config)
         if mode == "ollama":
             return LLMFactory._create_ollama_from_config(provider_config)
+        if mode == "claude":
+            return LLMFactory._create_claude_from_config(provider_config)
 
-        raise ValueError(f"不支持的 LLM 模式: {mode}。当前支持: openai, ollama")
+        raise ValueError(f"不支持的 LLM 模式: {mode}。当前支持: openai, ollama, claude")
 
     # ── 内部方法：从配置字典创建各引擎实例 ──
 
@@ -129,6 +137,21 @@ class LLMFactory:
             base_url=config.get("base_url", "http://localhost:11434"),
             model=config.get("model", "llama3"),
             timeout=config.get("timeout", 60),
+            system_prompt=system_prompt,
+            default_params=default_params,
+        )
+
+    @staticmethod
+    def _create_claude_from_config(config: dict) -> ClaudeLLM:
+        """从配置创建 ClaudeLLM 实例"""
+        default_params = config.get("default_params", {})
+        system_prompt = config.get("system_prompt", "")
+
+        return ClaudeLLM(
+            api_key=config.get("api_key", ""),
+            model=config.get("model", "claude-sonnet-4-20250514"),
+            base_url=config.get("base_url", "https://api.anthropic.com"),
+            timeout=config.get("timeout", 120),
             system_prompt=system_prompt,
             default_params=default_params,
         )

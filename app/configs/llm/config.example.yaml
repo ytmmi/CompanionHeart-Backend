@@ -3,7 +3,7 @@
 # cp config.example.yaml config.yaml
 
 # ── 当前激活的引擎模式 ──
-# 可选: openai / ollama
+# 可选: openai / ollama / claude
 mode: "openai"
 
 # ── OpenAI 兼容格式（/v1/chat/completions） ──
@@ -27,5 +27,19 @@ ollama:
   default_params:
     temperature: 0.7
     max_tokens: 2048
+    top_p: 0.95
+  system_prompt: "你是一个有用的AI助手。"
+
+# ── Anthropic Claude（Messages API） ──
+# 注意: Anthropic Messages API 不支持 role: "system" 在 messages 中，
+#       引擎会自动提取 system 消息通过请求体 system 字段发送。
+claude:
+  base_url: "https://api.anthropic.com"
+  api_key: "sk-ant-..." # ← 替换为实际 Anthropic API Key
+  model: "claude-sonnet-4-20250514" # claude-sonnet-4  / claude-opus-4 等
+  timeout: 120
+  default_params:
+    temperature: 0.7
+    max_tokens: 2048  # max_tokens 为必填
     top_p: 0.95
   system_prompt: "你是一个有用的AI助手。"

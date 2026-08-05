@@ -98,7 +98,7 @@ def edge_voice_catalog() -> list[dict]:
 
 
 def get_llm_models(mode: str) -> dict:
-    """拉模型列表：ollama 走 /api/tags，openai 兼容走 /v1/models"""
+    """拉模型列表：ollama 走 /api/tags，openai 兼容走 /v1/models，Claude 走预置列表"""
     llm = read_yaml(CONFIG_PATHS["llm"])
 
     if mode == "ollama":
@@ -113,6 +113,17 @@ def get_llm_models(mode: str) -> dict:
             return {"ok": False, "models": [], "error": str(e)}
         return {"ok": True, "models": sorted(models)}
 
+    if mode == "claude":
+        # Anthropic 没有公开模型列表 API，返回预设的当前模型列表
+        return {"ok": True, "models": [
+            "claude-opus-4-20250514",
+            "claude-sonnet-4-20250514",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-5-haiku-20241022",
+            "claude-3-opus-20240229",
+            "claude-3-haiku-20240307",
+        ], "hint": "Anthropic 无模型列表 API，此为预设列表"}
+
     base = str(dig(llm, "openai.base_url", "")).rstrip("/")
     key = str(dig(llm, "openai.api_key", ""))
     if not base:
@@ -125,7 +136,7 @@ def get_llm_models(mode: str) -> dict:
                 "hint": "部分端点不提供 /models，可手动填写模型名"}
     try:
         data = json.loads(text)
-        models = [m["id"] for m in data.get("data", []) if isinstance(m, dict) and "id" in m]
+        models = sorted({m["id"] for m in data.get("data", []) if isinstance(m, dict) and "id" in m})
     except Exception as e:
         return {"ok": False, "models": [], "error": str(e)}
-    return {"ok": True, "models": sorted(models)}
+    return {"ok": True, "models": models}

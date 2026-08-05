@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.tts import router as tts_router
 from app.api.llm import router as llm_router
 from app.api.agent import router as agent_router
+from app.api.asr import router as asr_router
 from app.api.conversations import router as conversations_router
 from app.plugins.manager import PluginManager
 
@@ -49,6 +50,7 @@ app.add_middleware(
 app.include_router(tts_router)
 app.include_router(llm_router)
 app.include_router(agent_router)
+app.include_router(asr_router)
 app.include_router(conversations_router)
 
 
@@ -97,7 +99,11 @@ def initialize_plugins():
             logger.info("启动插件: %s", plugin_name)
             # agent 插件需要注入 LLM 配置环境变量（配置单一真源: configs/llm/config.yaml）
             env = _build_agent_sidecar_env() if plugin.type == "agent" else None
-            success = _plugin_manager.start_plugin(plugin_name, env=env)
+            # ASR 插件模型较重（后台加载仍需时间），放宽健康检查等待；插件侧已改为
+            # 后台加载模型，/health 会立即就绪，此超时仅为慢机器的防御性余量
+            wait_timeout = 60 if plugin.type == "asr" else 10
+            success = _plugin_manager.start_plugin(
+                plugin_name, env=env, wait_timeout=wait_timeout)
             if not success:
                 logger.error("插件启动失败: %s", plugin_name)
         else:

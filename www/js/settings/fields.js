@@ -184,15 +184,26 @@ function buildPort(box, f, val, commit, group) {
 
 function buildModel(box, f, val, commit) {
   const rowEl = el('div', 'combo');
-  const listId = `dl-${f.key.replace(/\./g, '-')}`;
+
+  /* 可手写的文本输入框（始终可见） */
   const inp = el('input');
   inp.type = 'text';
   inp.value = val ?? '';
-  inp.setAttribute('list', listId);
   inp.addEventListener('input', () => commit(inp.value));
 
-  const dl = el('datalist');
-  dl.id = listId;
+  /* 模型下拉列表（初始化时显示当前配置值） */
+  const sel = el('select');
+  if (val) {
+    const curOpt = el('option', null, val);
+    curOpt.value = val;
+    sel.appendChild(curOpt);
+  }
+  sel.addEventListener('change', () => {
+    if (sel.value) {
+      inp.value = sel.value;
+      commit(sel.value);
+    }
+  });
 
   const btn = el('button', 'btn sm', '拉取列表');
   btn.type = 'button';
@@ -202,14 +213,16 @@ function buildModel(box, f, val, commit) {
     try {
       const r = await api(`/api/settings/llm-models?mode=${f.modelSource}`);
       if (r.ok && r.models.length) {
-        dl.innerHTML = '';
+        /* 完全重建下拉列表 */
+        sel.innerHTML = '';
         r.models.forEach(m => {
-          const o = el('option');
+          const o = el('option', null, m);
           o.value = m;
-          dl.appendChild(o);
+          sel.appendChild(o);
         });
-        toast(`拉到 ${r.models.length} 个模型，点输入框可选`, 'success');
-        inp.focus();
+        /* 有匹配时自动选中 */
+        sel.value = inp.value || '';
+        toast(`拉到 ${r.models.length} 个模型`, 'success');
       } else {
         toast(`拉取失败：${r.error || '无模型'}${r.hint ? '。' + r.hint : ''}`, 'warn', 5200);
       }
@@ -221,8 +234,8 @@ function buildModel(box, f, val, commit) {
     }
   });
 
-  rowEl.append(inp, btn);
-  box.append(rowEl, dl);
+  rowEl.append(inp, sel, btn);
+  box.append(rowEl);
 }
 
 function buildEdgeVoice(box, f, val, commit) {
