@@ -68,10 +68,34 @@ function buildSelect(box, f, val, commit) {
 }
 
 function buildPassword(box, f, val, commit) {
+  const v = val ?? '';
+  const multi = v.includes('\n');
+
+  if (multi) {
+    /* 多行私钥：用 textarea + 蒙版切换 */
+    const rowEl = el('div', 'pw-row');
+    const ta = el('textarea');
+    ta.value = v;
+    ta.placeholder = f.placeholder || '';
+    ta.rows = 3;
+    ta.style.cssText = 'font-family:monospace; font-size:12px; -webkit-text-security:disc;';
+    ta.addEventListener('input', () => commit(ta.value));
+    const eye = el('button', 'btn sm', '显示');
+    eye.type = 'button';
+    eye.addEventListener('click', () => {
+      const masked = ta.style.webkitTextSecurity === 'disc';
+      ta.style.webkitTextSecurity = masked ? 'none' : 'disc';
+      eye.textContent = masked ? '隐藏' : '显示';
+    });
+    rowEl.append(ta, eye);
+    box.appendChild(rowEl);
+    return;
+  }
+
   const rowEl = el('div', 'pw-row');
   const inp = el('input');
   inp.type = 'password';
-  inp.value = val ?? '';
+  inp.value = v;
   inp.placeholder = f.placeholder || '';
   inp.addEventListener('input', () => commit(inp.value));
   rowEl.append(inp, makeEyeButton(inp));

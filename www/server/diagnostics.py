@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 
 from .http_client import http_request
@@ -53,6 +54,8 @@ def test_connection(module: str) -> dict:
     if module == "asr":
         return _test_plugin_health(
             dig(read_yaml(CONFIG_PATHS["asr"]), "plugin.base_url", ""), "ASR 插件")
+    if module == "weather":
+        return _test_weather()
     return {"ok": False, "message": f"未知模块: {module}"}
 
 
@@ -179,3 +182,38 @@ def restart_agent() -> dict:
     if code != 200:
         return {"ok": False, "message": f"重启失败：HTTP {code} {(text or '')[:200]}"}
     return {"ok": True, "message": "Agent sidecar 已重启，新的 LLM 配置已生效"}
+
+
+def _test_weather() -> dict:
+    """测试天气配置：加载私钥签发 JWT 并调用 QWeather 北京实时天气"""
+    weather = read_yaml(CONFIG_PATHS["weather"])
+    if not weather.get("enabled"):
+        return {"ok": False, "message": "天气服务未启用"}
+
+    pk = weather.get("private_key", "")
+    kid = weather.get("kid", "")
+    sub = weather.get("sub", "")
+    if not pk or not kid or not sub:
+        return {"ok": False, "message": "请填写 Ed25519 私钥、凭据 ID 和项目 ID"}
+
+    try:
+        from app.weather import QWeatherEngine
+        engine = QWeatherEngine(
+            private_key=pk,
+            kid=kid,
+            sub=sub,
+            api_host=weather.get("api_host", "https://api.qweather.com"),
+            timeout=weather.get("timeout", 10),
+        )
+        loop = asyncio.new_event_loop()
+        try:
+            data = loop.run_until_complete(engine.get_current(39.92, 116.41))
+        finally:
+            loop.close()
+        return {"ok": True,
+                "message": f"北京现在 {data.weather}，{data.temperature}°C，湿度 {int(data.humidity * 100)}%"}
+    except Exception as e:
+        msg = str(e)
+        if "401" in msg or "Unauthorized" in msg:
+            return {"ok": False, "message": "认证失败：请检查私钥、kid、sub 是否正确，以及公钥是否已上传到控制台"}
+        return {"ok": False, "message": f"天气查询失败：{msg[:100]}"}

@@ -21,6 +21,7 @@ CONFIG_PATHS = {
     "tts":   PROJECT_ROOT / "app" / "configs" / "tts" / "config.yaml",
     "agent": PROJECT_ROOT / "app" / "configs" / "agent" / "config.yaml",
     "asr":   PROJECT_ROOT / "app" / "configs" / "asr" / "config.yaml",
+    "weather": PROJECT_ROOT / "app" / "configs" / "weather" / "config.yaml",
 }
 
 BACKEND_URL = "http://127.0.0.1:18000"

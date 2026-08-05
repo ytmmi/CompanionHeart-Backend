@@ -252,6 +252,32 @@ def _asr_group(asr: dict) -> dict:
     }
 
 
+def _weather_group(weather: dict) -> dict:
+    return {
+        "id": "weather", "title": "天气 (Weather)", "badge": "WTH",
+        "hint": "和风天气 QWeather Ed25519 私钥自动签发 JWT。"
+                "启用后前端通过浏览器 GPS/WiFi 获取模糊位置，自动切换房间背景（晴/雨/雪）与日出日落时间段。",
+        "fields": [
+            _f("weather.enabled", "启用天气服务", "switch", weather.get("enabled", False)),
+            _f("weather.private_key", "Ed25519 私钥", "password",
+               weather.get("private_key", ""),
+               placeholder="-----BEGIN PRIVATE KEY-----"),
+            _f("weather.kid", "凭据 ID（kid）", "text",
+               weather.get("kid", ""),
+               placeholder="控制台 -> 项目管理 -> 凭据 中查看"),
+            _f("weather.sub", "项目 ID（sub）", "text",
+               weather.get("sub", ""),
+               placeholder="控制台 -> 项目管理 中查看"),
+            _f("weather.api_host", "API 主机", "text",
+               weather.get("api_host", ""),
+               placeholder="控制台 -> 设置 中查看，直接复制即可（自动补 https://）"),
+            _f("weather.timeout", "请求超时（秒）", "number",
+               weather.get("timeout", 10), min=1, max=60, step=1),
+        ],
+        "test": "weather",
+    }
+
+
 def get_schema() -> dict:
     """构造简单视图的分组表单，值从 config.yaml 现读"""
     return {"groups": [
@@ -259,4 +285,5 @@ def get_schema() -> dict:
         _agent_group(read_yaml(CONFIG_PATHS["agent"])),
         _tts_group(read_yaml(CONFIG_PATHS["tts"])),
         _asr_group(read_yaml(CONFIG_PATHS["asr"])),
+        _weather_group(read_yaml(CONFIG_PATHS["weather"])),
     ]}

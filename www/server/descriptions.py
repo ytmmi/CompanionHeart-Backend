@@ -90,3 +90,11 @@ for _ep, _desc in (
     ("stop", "停止合成"), ("clear_cache", "清空参考音频缓存"),
 ):
     KEY_DESCRIPTIONS[f"tts.api.endpoints.{_ep}"] = f"{_desc}接口路径"
+
+# ── 天气 ──
+KEY_DESCRIPTIONS["weather.enabled"] = "启用后前端自动获取位置调后端 /api/weather/current 和 /api/sun/times"
+KEY_DESCRIPTIONS["weather.private_key"] = "Ed25519 私钥（PEM 格式）。后端自动签发 14 分钟有效 JWT，无需手动管理 Token"
+KEY_DESCRIPTIONS["weather.kid"] = "凭据 ID，在控制台 -> 项目管理 -> 点击项目 -> 凭据 中查看"
+KEY_DESCRIPTIONS["weather.sub"] = "项目 ID，在控制台 -> 项目管理 中查看"
+KEY_DESCRIPTIONS["weather.api_host"] = "你的专属 API 主机地址，在控制台 -> 设置 中查看，每个开发者唯一"
+KEY_DESCRIPTIONS["weather.timeout"] = "天气 API 请求超时时间（秒）"

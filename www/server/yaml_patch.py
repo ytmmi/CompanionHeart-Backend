@@ -11,6 +11,7 @@
 
 只支持标量赋值（str / int / float / bool / None）——
 这正是设置界面需要的全部能力；新增 key、删除 key、改列表不在范围内。
+多行值（含换行符）返回 False 让调用方走 _rebuild_write（yaml.dump 正确处理多行串）。
 """
 from __future__ import annotations
 
@@ -71,7 +72,6 @@ def _format_scalar(value, old_value: str) -> str:
         or s.strip() != s
         or s[0] in "#&*!|>%@`{}[],\"'"
         or ":" in s
-        or "\n" in s
         or s.lower() in ("true", "false", "null", "yes", "no", "on", "off", "~")
         or _looks_numeric(s)
     )
@@ -96,8 +96,14 @@ def set_scalar(path: Path, dotted_key: str, value) -> bool:
 
     dotted_key 形如 "openai.default_params.temperature"（不含模块前缀）。
     返回 True 表示改写成功；False 表示没找到这个 key（调用方应回退到重建写入）。
+
+    注意：多行值（含换行符）直接返回 False，由调用方走 yaml.dump 路径。
     """
     if not path.exists():
+        return False
+
+    # 多行值无法用单行替换表达，退回重建写入
+    if isinstance(value, str) and "\n" in value:
         return False
 
     text = path.read_text(encoding="utf-8")

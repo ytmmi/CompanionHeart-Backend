@@ -16,6 +16,7 @@ from app.api.tts import router as tts_router
 from app.api.llm import router as llm_router
 from app.api.agent import router as agent_router
 from app.api.asr import router as asr_router
+from app.api.weather import router as weather_router
 from app.api.conversations import router as conversations_router
 from app.plugins.manager import PluginManager
 
@@ -51,6 +52,7 @@ app.include_router(tts_router)
 app.include_router(llm_router)
 app.include_router(agent_router)
 app.include_router(asr_router)
+app.include_router(weather_router)
 app.include_router(conversations_router)
 
 
