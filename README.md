@@ -18,7 +18,7 @@
 | ASR 语音识别 | ✅      | FunASR + SenseVoiceSmall（本地 CPU 推理，多语言），**情感/事件作为独立信号**；暂未接入 API 层 |
 | 会话管理     | ✅      | `/api/conversations` 多对话上下文（JSON 文件持久化）                 |
 | 插件系统     | ✅      | 本地部署模型以独立进程插件运行（见 `PLUGIN_IMPLEMENTATION.md`）      |
-| 长期记忆     | 📋 待开发 | `MemoryProvider` 协议已就位，实现同协议即插即用                    |
+| 长期记忆     | ✅      | `MEMORY_omni` Provider 已接入 Agent：按角色 scope 自动召回、写入与管理 |
 | MCP / Live2D | 📋 待开发 | MCP 工具接入、Live2D 动作驱动                                      |
 
 > **路由收敛已完成**：`/api/llm/*` 已下线，对话统一走 `/api/agent/*`。
@@ -103,6 +103,14 @@ curl http://127.0.0.1:18000/api/agent/status
 | POST | `/api/agent/chat/stream/sentences`| Agent 句子级流式（NDJSON，文本+TTS 音频成对） |
 | POST | `/api/agent/abort`                | 中断进行中的 Agent 对话                  |
 | POST | `/api/agent/restart`              | 重启 Agent sidecar 子进程                |
+| GET  | `/api/memory/health`              | 长期记忆 Provider 健康状态               |
+| GET  | `/api/memory/status`              | 当前角色长期记忆统计                     |
+| POST | `/api/memory/search`              | 当前角色长期记忆检索                     |
+| POST | `/api/memory/text`                | 写入一条显式长期记忆                     |
+| GET  | `/api/memory/life/{id}`           | 读取指定长期记忆                         |
+| POST | `/api/memory/life/{id}/revise`    | 修订指定长期记忆                         |
+| DELETE | `/api/memory/life/{id}`          | 删除指定长期记忆                         |
+| DELETE | `/api/memory/scope`              | 遗忘当前角色的全部长期记忆               |
 | GET  | `/api/voice/tts/voices`           | 语音/角色列表                            |
 | GET  | `/api/voice/tts/status`           | TTS 引擎状态                             |
 | GET  | `/api/voice/tts/enabled`          | 查询 TTS 是否启用                        |
@@ -129,7 +137,7 @@ CompanionHeart-Backend/
 │   │   └── llm/           #   LLM 推理底座（base + factories + openai_llm / ollama / anthropic）
 │   ├── tts/               # TTS 引擎（EdgeTTS / GenieTTS / 插件客户端）
 │   ├── asr/               # ASR 引擎（base + factories + 插件客户端，情感信号）
-│   ├── memory/            # 会话存储（short_term：JSON 文件持久化）
+│   ├── memory/            # 短期会话 + 长期生活记忆协议/Provider scope
 │   ├── plugins/           # 插件系统（扫描/注册/启动/HTTP 客户端）
 │   ├── configs/           # YAML 配置（agent / llm / tts / asr）
 │   ├── models/            # AI 模型资源（GenieTTS ONNX 等）
@@ -164,6 +172,12 @@ CompanionHeart-Backend/
 - 前端聊天管线：`POST /api/agent/chat` → `POST /api/voice/tts/stream/sentences`（句子级同步，引擎不支持时回退 `/api/voice/tts`）
   - 也可一步到位用 `POST /api/agent/chat/stream/sentences`（后端内部完成分句 + TTS，文本与音频成对流出）
 - 对话引擎：统一走 `/api/agent/*`（`/api/llm/*` 已下线，不再有回退路径）
+- Agent 与长期记忆：前端在 Agent 请求中传递已注册的 `role_name_en`；后端按角色和固定本地用户
+  scope 组装最近 10 条短期上下文，并在每轮对话前召回长期生活记忆、回复完成后写入用户文本。
+  前端不直接访问记忆文件或拼接 `user_namespace`。
+- 长期记忆管理：前端客户端位于 `../CompanionHeart-UI/src/shared/services/memory.ts`，对应
+  `/api/memory/health`、`/status`、`/search`、`/text`、`/life/{id}`、`/scope` 等接口；
+  记忆抽取、去重、索引、修订和持久化由 `MEMORY_omni` Provider 负责。
 - TTS 开关：前端以 localStorage 持久化为准，启动时 `POST /api/voice/tts/enabled` 同步（后端开关为进程内状态，重启复位）
 - 前端可用 `VITE_API_BASE_URL` 覆盖后端地址（默认 `http://127.0.0.1:18000`）
 
@@ -172,6 +186,10 @@ CompanionHeart-Backend/
 ## 测试
 
 ```powershell
+# pytest 已安装在项目虚拟环境（如未安装：.venv\python.exe -m pip install pytest）
+# 记忆模块单元测试（不依赖真实 MEMORY_omni 服务）
+.venv\python.exe -m pytest tests\memory -q --ignore=tests\memory\test_omni_plugin.py
+
 # 需先启动后端（API / 端到端测试）或配置好引擎（模块测试）
 .venv\Scripts\python tests\llm\test_llm_module.py
 .venv\Scripts\python tests\tts\test_tts_module.py
@@ -181,6 +199,7 @@ CompanionHeart-Backend/
 .venv\Scripts\python -X utf8 tests\agent\test_agent_module.py
 # Agent：端到端（需后端 + sidecar + 有效 API Key）
 .venv\Scripts\python -X utf8 tests\agent\test_agent_integration.py
+.venv\python.exe tests\agent\test_frontend_session_flow.py
 .venv\Scripts\python -X utf8 tests\agent\test_phase2_e2e.py
 
 # ASR：自行启停插件子进程，用 TTS 合成的已知文本音频做闭环
