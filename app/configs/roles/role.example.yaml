@@ -1,0 +1,35 @@
+# 每个角色一个 YAML。实际文件名必须与 name_en 一致，例如 akari.yaml。
+# 角色文件可以提交；API Key 等密钥仍只放在对应模块的 config.yaml。
+
+name: "角色显示名"
+name_en: "role_name"
+enabled: true
+default: false
+
+# 一个角色可以关联多个 Live2D 模型，但最多一个 default: true。
+live2d_models:
+  - id: "desktop"
+    name: "桌面模型"
+    path: "models/role_name/desktop.model3.json"
+    default: true
+  - id: "mobile"
+    name: "移动端模型"
+    path: "models/role_name/mobile.model3.json"
+    default: false
+
+# 只保存角色的引擎选择、音色和参数覆盖，不保存服务密钥。
+tts:
+  mode: "plugin"
+  voice: ""
+  character_name: ""
+  emotion: "Normal"
+  settings: {}
+
+persona:
+  system_prompt: ""
+  description: ""
+  greeting: ""
+  settings: {}
+
+# 其他角色级扩展配置；业务模块应使用明确命名的键。
+settings: {}

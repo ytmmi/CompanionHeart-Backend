@@ -41,6 +41,7 @@ class AgentPluginClient:
         system_prompt: str = "",
         request_id: Optional[str] = None,
         options: Optional[dict] = None,
+        tool_context: Optional[dict] = None,
     ) -> dict:
         """
         非流式对话。
@@ -59,6 +60,8 @@ class AgentPluginClient:
             payload["request_id"] = request_id
         if options:
             payload["options"] = options
+        if tool_context:
+            payload["tool_context"] = tool_context
 
         resp = await self.client.post("/chat", json=payload)
         if resp.status_code != 200:
@@ -72,6 +75,7 @@ class AgentPluginClient:
         system_prompt: str = "",
         request_id: Optional[str] = None,
         options: Optional[dict] = None,
+        tool_context: Optional[dict] = None,
     ) -> AsyncIterator[dict]:
         """
         流式对话：解析 sidecar 的 NDJSON 字节流，逐行产出归一化事件字典。
@@ -84,6 +88,8 @@ class AgentPluginClient:
             payload["request_id"] = request_id
         if options:
             payload["options"] = options
+        if tool_context:
+            payload["tool_context"] = tool_context
 
         buffer = b""
         async for chunk in self.client.stream_post("/chat/stream", json=payload):

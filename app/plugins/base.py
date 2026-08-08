@@ -25,9 +25,14 @@ class PluginAPIConfig:
     chat_stream: Optional[str] = None  # LLM / Agent
     models: Optional[str] = None  # LLM
     info: Optional[str] = None  # Agent
+    run: Optional[str] = None  # Work Agent
     abort: Optional[str] = None  # Agent
     transcribe: Optional[str] = None  # ASR
     languages: Optional[str] = None  # ASR
+    memory_upsert: Optional[str] = None  # MEMORY
+    memory_query: Optional[str] = None  # MEMORY
+    memory_delete: Optional[str] = None  # MEMORY
+    memory_scope_delete: Optional[str] = None  # MEMORY
 
 
 @dataclass
@@ -76,9 +81,14 @@ class Plugin:
                 chat_stream=api_data.get("chat_stream"),
                 models=api_data.get("models"),
                 info=api_data.get("info"),
+                run=api_data.get("run"),
                 abort=api_data.get("abort"),
                 transcribe=api_data.get("transcribe"),
                 languages=api_data.get("languages"),
+                memory_upsert=api_data.get("memory_upsert"),
+                memory_query=api_data.get("memory_query"),
+                memory_delete=api_data.get("memory_delete"),
+                memory_scope_delete=api_data.get("memory_scope_delete"),
             ),
             dependencies=data.get("dependencies", []),
             repository=data.get("repository"),

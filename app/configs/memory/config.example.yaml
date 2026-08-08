@@ -1,0 +1,6 @@
+mode: "omni_plugin"
+enabled: true
+omni_plugin:
+  plugin_name: "MEMORY_omni"
+  base_url: "http://localhost:8500"
+  timeout: 30

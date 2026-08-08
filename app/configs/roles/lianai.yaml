@@ -1,0 +1,26 @@
+name: "怜爱"
+name_en: "lianai"
+enabled: true
+default: true
+
+live2d_models:
+  - id: "universal"
+    name: "万能自定义模型"
+    path: "live2d-models/万能自定义模型1.1.0_4K/万能自定义模型.model3.json"
+    default: true
+
+# 当前角色不指定 TTS 引擎或音色；空值表示沿用调用方/模块默认行为。
+tts:
+  mode: ""
+  voice: ""
+  character_name: ""
+  emotion: ""
+  settings: {}
+
+persona:
+  system_prompt: ""
+  description: ""
+  greeting: ""
+  settings: {}
+
+settings: {}

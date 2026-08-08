@@ -1,6 +1,6 @@
 """ConversationStore — 多对话上下文的 JSON 文件存储
 
-存储布局（app/memory/short_term/data/）:
+存储布局（app/memory/temp_memory/<role_name_en>/short_term/）:
     index.json          — 会话索引（元信息列表，按 updated_at 倒序读取）
     {conversation_id}.json — 单个会话的完整消息记录
 
@@ -18,12 +18,16 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import threading
 import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+from app.memory.paths import resolve_role_temp_path, role_key
+from app.memory.roles import get_role_registry
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +55,7 @@ class ConversationMeta:
     title: str
     created_at: str
     updated_at: str
+    role_name_en: str = ""
     message_count: int = 0
     preview: str = ""  # 最后一条消息的截断预览
 
@@ -62,6 +67,7 @@ class Conversation:
     title: str
     created_at: str
     updated_at: str
+    role_name_en: str = ""
     messages: list[dict] = field(default_factory=list)  # {role, content, timestamp}
 
 
@@ -70,7 +76,13 @@ class Conversation:
 class ConversationStore:
     """多对话 JSON 文件存储（线程安全，进程内单例使用）"""
 
-    def __init__(self, data_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        data_dir: Optional[Path] = None,
+        *,
+        role_name_en: str = "",
+    ):
+        self.role_name_en = role_name_en
         self._data_dir = data_dir or Path(__file__).parent / "data"
         self._index_path = self._data_dir / "index.json"
         self._lock = threading.Lock()
@@ -127,12 +139,14 @@ class ConversationStore:
             title=title or "新对话",
             created_at=now,
             updated_at=now,
+            role_name_en=self.role_name_en,
         )
         with self._lock:
             self._atomic_write(self._conv_path(conv.id), asdict(conv))
             self._update_index_entry(ConversationMeta(
                 id=conv.id, title=conv.title,
                 created_at=now, updated_at=now,
+                role_name_en=conv.role_name_en,
             ))
         logger.info("新对话已创建: %s", conv.id)
         return conv
@@ -150,6 +164,7 @@ class ConversationStore:
                 title=data.get("title", "对话"),
                 created_at=data.get("created_at", ""),
                 updated_at=data.get("updated_at", ""),
+                role_name_en=data.get("role_name_en", self.role_name_en),
                 messages=data.get("messages", []),
             )
         except (json.JSONDecodeError, OSError, KeyError) as e:
@@ -166,6 +181,7 @@ class ConversationStore:
                 title=e.get("title", "对话"),
                 created_at=e.get("created_at", ""),
                 updated_at=e.get("updated_at", ""),
+                role_name_en=e.get("role_name_en", self.role_name_en),
                 message_count=e.get("message_count", 0),
                 preview=e.get("preview", ""),
             )
@@ -199,6 +215,7 @@ class ConversationStore:
             self._update_index_entry(ConversationMeta(
                 id=conv.id, title=conv.title,
                 created_at=conv.created_at, updated_at=conv.updated_at,
+                role_name_en=conv.role_name_en,
                 message_count=len(conv.messages),
                 preview=self._make_preview(conv.messages),
             ))
@@ -227,6 +244,7 @@ class ConversationStore:
             self._update_index_entry(ConversationMeta(
                 id=conv.id, title=conv.title,
                 created_at=conv.created_at, updated_at=conv.updated_at,
+                role_name_en=conv.role_name_en,
                 message_count=len(conv.messages),
                 preview=self._make_preview(conv.messages),
             ))
@@ -252,14 +270,79 @@ class ConversationStore:
 # ── 进程内单例 ──
 
 _store: Optional[ConversationStore] = None
+_role_stores: dict[str, ConversationStore] = {}
 _store_lock = threading.Lock()
 
 
-def get_conversation_store() -> ConversationStore:
-    """获取 ConversationStore 单例"""
+def _migrate_legacy_data(target_dir: Path, role_name_en: str) -> None:
+    """把历史原始短期文件迁入 temp_memory，源目录暂保留备份。"""
+    legacy_dirs = [
+        Path(__file__).parent / "data",
+        Path(__file__).parents[1] / "data_memory" / role_name_en / "short_term",
+    ]
+    copied = 0
+    for legacy_dir in legacy_dirs:
+        if not legacy_dir.exists():
+            continue
+        for source in legacy_dir.glob("*.json"):
+            target = target_dir / source.name
+            if target.exists():
+                continue
+            temporary = target.with_suffix(target.suffix + ".migrating")
+            shutil.copy2(source, temporary)
+            temporary.replace(target)
+            copied += 1
+    if copied:
+        logger.info(
+            "已将 %d 个旧原始短期文件迁入 temp_memory 角色 %s；源目录保留为备份",
+            copied,
+            role_name_en,
+        )
+
+    # 旧格式没有角色字段；在新目录内补齐，旧目录始终保持原样。
+    for path in target_dir.glob("*.json"):
+        try:
+            with path.open("r", encoding="utf-8") as file:
+                data = json.load(file)
+            changed = False
+            if isinstance(data, dict):
+                if data.get("role_name_en") != role_name_en:
+                    data["role_name_en"] = role_name_en
+                    changed = True
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict) and item.get("role_name_en") != role_name_en:
+                        item["role_name_en"] = role_name_en
+                        changed = True
+            if changed:
+                ConversationStore._atomic_write(path, data)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("迁移会话角色字段失败 %s: %s", path, exc)
+
+
+def get_conversation_store(role_name_en: Optional[str] = None) -> ConversationStore:
+    """获取角色隔离的 ConversationStore；缺省使用角色配置中的默认角色。"""
     global _store
-    if _store is None:
-        with _store_lock:
-            if _store is None:
-                _store = ConversationStore()
-    return _store
+
+    registry = get_role_registry()
+    role = registry.resolve(role_name_en)
+    key = role_key(role.name_en)
+    store = _role_stores.get(key)
+    if store is not None:
+        return store
+
+    with _store_lock:
+        store = _role_stores.get(key)
+        if store is None:
+            data_dir = resolve_role_temp_path(
+                role.name_en,
+                "short_term",
+                create=True,
+            )
+            if registry.default_role and key == role_key(registry.default_role.name_en):
+                _migrate_legacy_data(data_dir, role.name_en)
+            store = ConversationStore(data_dir, role_name_en=role.name_en)
+            _role_stores[key] = store
+            if registry.default_role and key == role_key(registry.default_role.name_en):
+                _store = store
+    return store

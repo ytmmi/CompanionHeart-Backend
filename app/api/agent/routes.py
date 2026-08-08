@@ -26,12 +26,27 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.agent import AgentBase, AgentFactory
-from app.memory.short_term import get_conversation_store
+from app.agent.companion import (
+    CompanionChatService,
+    ConversationNotFound,
+    InvalidChatMode,
+    ResolvedChatTurn,
+)
+from app.memory.roles import RoleConfigError
+from app.memory.life import LifeMemoryService, create_life_memory_service
+from app.developer import (
+    DeveloperAuthAction,
+    DeveloperAuthInterceptor,
+    DeveloperAuthOutcome,
+    DeveloperChatService,
+    get_developer_auth,
+)
+from app.developer import configure_developer_auth as configure_developer_auth_runtime
 from app.utils.sentence import SentenceSplitter
 
 logger = logging.getLogger(__name__)
@@ -58,6 +73,10 @@ class AgentChatRequest(BaseModel):
     conversation_id: Optional[str] = Field(
         None, description="会话模式：会话 ID（由 POST /api/conversations 创建）",
     )
+    role_name_en: Optional[str] = Field(
+        None,
+        description="角色英文名；缺省使用 app/configs/roles 中的默认角色",
+    )
     text: Optional[str] = Field(
         None, min_length=1, description="会话模式：本次用户消息文本",
     )
@@ -81,6 +100,7 @@ class AgentChatResponse(BaseModel):
     model: str = Field(..., description="使用的模型名称")
     engine: str = Field(..., description="引擎类型")
     conversation_id: Optional[str] = Field(None, description="会话模式下回传会话 ID")
+    role_name_en: str = Field(..., description="本轮对话所属角色英文名")
 
 
 class AgentStatus(BaseModel):
@@ -97,12 +117,110 @@ class AgentStatus(BaseModel):
 class AbortRequest(BaseModel):
     """中断请求"""
     conversation_id: Optional[str] = Field(None, description="要中断的会话；不传则中断全部")
+    role_name_en: Optional[str] = Field(None, description="会话所属角色；缺省使用默认角色")
 
 
 # ── 依赖注入 ──
 
 _agent_engine: Optional[AgentBase] = None
 _agent_config: Optional[dict] = None
+_chat_service: Optional[CompanionChatService] = None
+_life_memory_service: Optional[LifeMemoryService] = None
+_developer_chat = DeveloperChatService()
+
+
+def configure_developer_auth(interceptor: DeveloperAuthInterceptor) -> None:
+    """测试/应用装配注入；开发密钥仍只能由 interceptor 的安全 provider 提供。"""
+    configure_developer_auth_runtime(interceptor)
+
+
+def configure_developer_chat_service(service: DeveloperChatService) -> None:
+    global _developer_chat
+    _developer_chat = service
+
+
+def _developer_preflight(
+    payload: AgentChatRequest, http_request: Request
+) -> DeveloperAuthOutcome:
+    """必须在 sidecar 检查、会话写入和日志之前执行。"""
+    text = payload.text
+    if text is None and payload.messages:
+        users = [message.content for message in payload.messages if message.role == "user"]
+        text = users[-1] if users else ""
+    session_id = (
+        http_request.headers.get("X-Developer-Session-Id")
+        or http_request.cookies.get("companionheart_dev_session")
+    )
+    client_id = http_request.headers.get("X-Companion-Client-Id", "local-desktop")
+    return get_developer_auth().inspect(
+        text or "", client_id=client_id, session_id=session_id
+    )
+
+
+def _developer_status_code(outcome: DeveloperAuthOutcome) -> int:
+    if outcome.action == DeveloperAuthAction.DENIED:
+        return 401
+    if outcome.action == DeveloperAuthAction.RATE_LIMITED:
+        return 429
+    return 200
+
+
+def _set_developer_headers(response, outcome: DeveloperAuthOutcome) -> None:
+    response.headers["X-Developer-Mode"] = "active" if outcome.developer_mode else "inactive"
+    if outcome.session_id:
+        response.headers["X-Developer-Session-Id"] = outcome.session_id
+        response.set_cookie(
+            "companionheart_dev_session",
+            outcome.session_id,
+            max_age=1800,
+            httponly=True,
+            samesite="strict",
+        )
+    elif outcome.action == DeveloperAuthAction.EXITED:
+        response.delete_cookie("companionheart_dev_session")
+
+
+def _developer_json_response(
+    payload: AgentChatRequest, outcome: DeveloperAuthOutcome
+) -> JSONResponse:
+    try:
+        role = get_companion_chat_service().role_registry.resolve(payload.role_name_en)
+        role_name_en = role.name_en
+    except RoleConfigError:
+        role_name_en = payload.role_name_en or ""
+    response = JSONResponse(
+        status_code=_developer_status_code(outcome),
+        content={
+            "reply": outcome.message,
+            "tool_calls": [],
+            "model": "",
+            "engine": "developer-auth",
+            "conversation_id": payload.conversation_id,
+            "role_name_en": role_name_en,
+        },
+    )
+    _set_developer_headers(response, outcome)
+    return response
+
+
+def _developer_stream_response(
+    outcome: DeveloperAuthOutcome, *, sentences: bool = False
+) -> StreamingResponse:
+    async def content():
+        if sentences:
+            yield (json.dumps({"type": "sentence", "text": outcome.message}, ensure_ascii=False) + "\n").encode()
+            yield b'{"type":"done"}\n'
+        else:
+            yield f"data: {json.dumps({'content': outcome.message, 'engine': 'developer-auth'}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+
+    response = StreamingResponse(
+        content(),
+        status_code=_developer_status_code(outcome),
+        media_type="application/x-ndjson" if sentences else "text/event-stream",
+    )
+    _set_developer_headers(response, outcome)
+    return response
 
 
 def _load_agent_config() -> dict:
@@ -171,40 +289,82 @@ async def _ensure_sidecar(engine: AgentBase) -> None:
     raise HTTPException(status_code=503, detail="agent sidecar 不可用（自动重启失败）")
 
 
-# ── 消息解析 ──
+# ── 聊天编排 ──
 
-def _resolve_messages(request: AgentChatRequest) -> list[dict]:
-    """
-    解析本次调用的消息列表（两种模式二选一）：
-    - 会话模式：用户消息写入会话存储后组装最近上下文
-    - 无状态模式：直接使用请求携带的消息列表
-    """
-    if request.conversation_id is not None:
-        if not request.text:
-            raise HTTPException(status_code=400, detail="会话模式必须提供 text")
-        store = get_conversation_store()
-        if store.append_message(request.conversation_id, "user", request.text) is None:
-            raise HTTPException(
-                status_code=404, detail=f"对话不存在: {request.conversation_id}")
-        return store.build_context(request.conversation_id)
-
-    if not request.messages:
-        raise HTTPException(
-            status_code=400, detail="必须提供 messages（无状态模式）或 conversation_id + text（会话模式）")
-    return [{"role": m.role, "content": m.content} for m in request.messages]
+def get_companion_chat_service() -> CompanionChatService:
+    """获取陪伴聊天编排服务单例。"""
+    global _chat_service
+    if _chat_service is None:
+        _chat_service = CompanionChatService(life_memory=get_life_memory_service())
+    return _chat_service
 
 
-def _save_reply(request: AgentChatRequest, reply: str) -> None:
-    """会话模式下把 agent 回复写回会话存储（无状态模式为 no-op）
+def get_life_memory_service() -> LifeMemoryService | None:
+    """从记忆配置创建协议转发器；真正的记忆处理只在 MEMORY_omni 内完成。"""
+    global _life_memory_service
+    if _life_memory_service is not None:
+        return _life_memory_service
+    _life_memory_service = create_life_memory_service()
+    return _life_memory_service
+
+
+async def _resolve_turn(
+    request: AgentChatRequest,
+    developer: DeveloperAuthOutcome | None = None,
+    developer_client_id: str = "local-desktop",
+) -> ResolvedChatTurn:
+    """把 API 请求解析为角色 scope 感知的聊天轮次。"""
+    messages = (
+        [{"role": message.role, "content": message.content} for message in request.messages]
+        if request.messages
+        else None
+    )
+    try:
+        if developer and developer.developer_mode and developer.session_id:
+            return await _developer_chat.begin_turn(
+                session_id=developer.session_id,
+                text=request.text,
+                messages=messages,
+                role_name_en=request.role_name_en,
+                client_id=developer_client_id,
+            )
+        return await get_companion_chat_service().begin_turn(
+            conversation_id=request.conversation_id,
+            text=request.text,
+            messages=messages,
+            role_name_en=request.role_name_en,
+        )
+    except ConversationNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (InvalidChatMode, RoleConfigError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+async def _save_reply(
+    turn: ResolvedChatTurn,
+    reply: str,
+    *,
+    allow_memory_write: bool = True,
+) -> None:
+    """会话模式下把 agent 回复交给编排服务保存（无状态模式为 no-op）。
 
     注意：工具调用摘要不写入短期记忆（只存对话文本，保持记忆干净）。
     """
-    if request.conversation_id is not None and reply:
-        get_conversation_store().append_message(
-            request.conversation_id, "assistant", reply)
+    try:
+        if turn.developer_session_id:
+            await _developer_chat.save_reply(turn, reply)
+            return
+        await get_companion_chat_service().save_reply(
+            turn, reply, allow_memory_write=allow_memory_write
+        )
+    except ConversationNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-def _build_kwargs(request: AgentChatRequest) -> dict:
+def _build_kwargs(
+    request: AgentChatRequest,
+    turn: Optional[ResolvedChatTurn] = None,
+) -> dict:
     """构建引擎调用参数"""
     kwargs: dict = {}
     if request.temperature is not None:
@@ -213,9 +373,25 @@ def _build_kwargs(request: AgentChatRequest) -> dict:
         kwargs["max_tokens"] = request.max_tokens
     if request.system_prompt is not None:
         kwargs["system_prompt"] = request.system_prompt
-    if request.conversation_id is not None:
-        # 用会话 ID 作为中断追踪键
-        kwargs["track_key"] = request.conversation_id
+    if turn and turn.memory_context:
+        base_prompt = kwargs.get("system_prompt") or _resolve_system_prompt(_load_agent_config())
+        kwargs["system_prompt"] = f"{base_prompt}\n\n{turn.memory_context}".strip()
+    if turn and turn.track_key is not None:
+        # 角色 + 会话 ID 作为中断追踪键，避免跨角色冲突。
+        kwargs["track_key"] = turn.track_key
+    if turn:
+        # 工具上下文由后端确定；不把生活 namespace、记忆召回或完整历史交给工具。
+        kwargs["tool_context"] = {
+            "role_name_en": turn.role_name_en,
+            "stable_user_id": "local-default",
+        }
+        if turn.developer_session_id:
+            kwargs["tool_context"].update(
+                {
+                    "developer_session_id": turn.developer_session_id,
+                    "client_id": turn.developer_client_id or "local-desktop",
+                }
+            )
     return kwargs
 
 
@@ -259,20 +435,28 @@ async def list_tools(
 @router.post("/chat", response_model=AgentChatResponse)
 async def chat(
     request: AgentChatRequest,
-    engine: AgentBase = Depends(get_agent_engine),
+    http_request: Request,
 ):
     """
     非流式对话 — agent 循环（LLM + 工具调用）跑完后返回完整回复与工具调用摘要。
     """
     try:
+        developer = _developer_preflight(request, http_request)
+        if developer.consume_message:
+            return _developer_json_response(request, developer)
+        engine = await get_agent_engine()
         await _ensure_sidecar(engine)
-        messages = _resolve_messages(request)
-        result = await engine.process_text(messages, **_build_kwargs(request))
-        _save_reply(request, result["reply"])
+        turn = await _resolve_turn(
+            request,
+            developer,
+            http_request.headers.get("X-Companion-Client-Id", "local-desktop"),
+        )
+        result = await engine.process_text(turn.messages, **_build_kwargs(request, turn))
+        await _save_reply(turn, result["reply"], allow_memory_write=not result["tool_calls"])
 
         info = await engine.get_info()
         logger.info("Agent 对话成功: messages=%d, reply_len=%d, tools=%d",
-                    len(messages), len(result["reply"]), len(result["tool_calls"]))
+                    len(turn.messages), len(result["reply"]), len(result["tool_calls"]))
 
         return AgentChatResponse(
             reply=result["reply"],
@@ -281,6 +465,7 @@ async def chat(
             model=info.get("model", ""),
             engine="pi_sidecar",
             conversation_id=request.conversation_id,
+            role_name_en=turn.role_name_en,
         )
     except HTTPException:
         raise
@@ -292,7 +477,7 @@ async def chat(
 @router.post("/chat/stream")
 async def chat_stream(
     request: AgentChatRequest,
-    engine: AgentBase = Depends(get_agent_engine),
+    http_request: Request,
 ):
     """
     流式对话 — SSE (text/event-stream) 逐 chunk 返回。
@@ -304,14 +489,23 @@ async def chat_stream(
     会话模式下完整回复在流结束后自动写回会话存储（中断时保留已生成部分）。
     """
     try:
+        developer = _developer_preflight(request, http_request)
+        if developer.consume_message:
+            return _developer_stream_response(developer)
+        engine = await get_agent_engine()
         await _ensure_sidecar(engine)
-        messages = _resolve_messages(request)
-        kwargs = _build_kwargs(request)
+        turn = await _resolve_turn(
+            request,
+            developer,
+            http_request.headers.get("X-Companion-Client-Id", "local-desktop"),
+        )
+        kwargs = _build_kwargs(request, turn)
 
         async def event_stream():
             full_reply = []
+            saw_tool = False
             try:
-                async for event in engine.process_text_stream(messages, **kwargs):
+                async for event in engine.process_text_stream(turn.messages, **kwargs):
                     etype = event.get("type")
                     if etype == "delta":
                         full_reply.append(event["content"])
@@ -319,20 +513,21 @@ async def chat_stream(
                     elif etype == "thinking" and request.include_thinking:
                         yield f"data: {json.dumps({'thinking': event['content']}, ensure_ascii=False)}\n\n"
                     elif etype == "tool":
+                        saw_tool = True
                         payload = {"tool": {"name": event.get("name"), "phase": event.get("phase")}}
                         yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     elif etype == "error":
                         yield f"data: {json.dumps({'error': event.get('message', '未知错误')}, ensure_ascii=False)}\n\n"
                     # done 事件不单独输出，统一以 [DONE] 收尾
 
-                _save_reply(request, "".join(full_reply))
+                await _save_reply(turn, "".join(full_reply), allow_memory_write=not saw_tool)
                 yield "data: [DONE]\n\n"
                 logger.info("Agent 流式对话完成: messages=%d, reply_len=%d",
-                            len(messages), sum(len(c) for c in full_reply))
+                            len(turn.messages), sum(len(c) for c in full_reply))
             except Exception as e:
                 logger.error("Agent 流式对话中断: %s", e)
                 # 中断时已生成的部分回复也写回会话，保持上下文连贯
-                _save_reply(request, "".join(full_reply))
+                await _save_reply(turn, "".join(full_reply), allow_memory_write=False)
                 yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
 
@@ -356,7 +551,7 @@ async def chat_stream(
 @router.post("/chat/stream/sentences")
 async def chat_stream_sentences(
     request: AgentChatRequest,
-    engine: AgentBase = Depends(get_agent_engine),
+    http_request: Request,
 ):
     """
     句子级流式对话 — NDJSON (application/x-ndjson)。
@@ -378,9 +573,17 @@ async def chat_stream_sentences(
     from app.api.tts.routes import _tts_enabled, get_tts_engine
 
     try:
+        developer = _developer_preflight(request, http_request)
+        if developer.consume_message:
+            return _developer_stream_response(developer, sentences=True)
+        engine = await get_agent_engine()
         await _ensure_sidecar(engine)
-        messages = _resolve_messages(request)
-        kwargs = _build_kwargs(request)
+        turn = await _resolve_turn(
+            request,
+            developer,
+            http_request.headers.get("X-Companion-Client-Id", "local-desktop"),
+        )
+        kwargs = _build_kwargs(request, turn)
 
         # TTS 引擎（禁用或初始化失败时退化为纯文本行）
         tts = None
@@ -432,9 +635,10 @@ async def chat_stream_sentences(
 
         async def ndjson_stream():
             full_reply = []
+            saw_tool = False
             splitter = SentenceSplitter()
             try:
-                async for event in engine.process_text_stream(messages, **kwargs):
+                async for event in engine.process_text_stream(turn.messages, **kwargs):
                     etype = event.get("type")
                     if etype == "delta":
                         full_reply.append(event["content"])
@@ -442,6 +646,7 @@ async def chat_stream_sentences(
                             async for line in synthesize_sentence(sentence):
                                 yield line
                     elif etype == "tool":
+                        saw_tool = True
                         yield _ndjson_line({
                             "type": "tool",
                             "name": event.get("name"),
@@ -456,13 +661,13 @@ async def chat_stream_sentences(
                     async for line in synthesize_sentence(rest):
                         yield line
 
-                _save_reply(request, "".join(full_reply))
+                await _save_reply(turn, "".join(full_reply), allow_memory_write=not saw_tool)
                 yield _ndjson_line({"type": "done"})
                 logger.info("Agent 句子级流式完成: messages=%d, reply_len=%d",
-                            len(messages), sum(len(c) for c in full_reply))
+                            len(turn.messages), sum(len(c) for c in full_reply))
             except Exception as e:
                 logger.error("Agent 句子级流式中断: %s", e)
-                _save_reply(request, "".join(full_reply))
+                await _save_reply(turn, "".join(full_reply), allow_memory_write=False)
                 yield _ndjson_line({"type": "error", "message": str(e)})
                 yield _ndjson_line({"type": "done"})
 
@@ -512,7 +717,14 @@ async def abort(
 ):
     """中断进行中的对话（传 conversation_id 中断指定会话，不传中断全部）"""
     try:
-        ok = await engine.abort(request.conversation_id)
+        track_key = None
+        if request.conversation_id:
+            try:
+                role = get_companion_chat_service().role_registry.resolve(request.role_name_en)
+            except RoleConfigError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            track_key = f"{role.name_en}:{request.conversation_id}"
+        ok = await engine.abort(track_key)
         return {"ok": ok}
     except Exception as e:
         logger.error("Agent 中断失败: %s", e)

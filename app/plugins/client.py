@@ -75,6 +75,17 @@ class PluginHTTPClient:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             return await client.get(url, **kwargs)
 
+    async def delete(
+        self,
+        endpoint: str,
+        json: Optional[dict] = None,
+        **kwargs,
+    ) -> httpx.Response:
+        """发送 DELETE 请求（可选 JSON 请求体）。"""
+        url = f"{self.base_url}{endpoint}"
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            return await client.delete(url, json=json, **kwargs)
+
     async def stream_post(
         self,
         endpoint: str,

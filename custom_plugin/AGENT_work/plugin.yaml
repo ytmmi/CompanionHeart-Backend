@@ -1,0 +1,20 @@
+name: "AGENT_work"
+version: "0.1.0"
+type: "agent"
+description: "CompanionHeart 独立工作 Agent sidecar（无生活记忆权限）"
+author: "CompanionHeart"
+
+service:
+  port: 8310
+  health_check: "/health"
+  protocol: "http"
+
+api:
+  info: "/info"
+  run: "/run"
+  abort: "/abort"
+
+dependencies:
+  - fastapi
+  - uvicorn
+  - pydantic

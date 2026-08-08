@@ -69,7 +69,7 @@ class PluginManager:
         self,
         plugin_name: str,
         wait_timeout: int = 10,
-        env: Optional[dict[str, str]] = None,
+        env: Optional[dict[str, str | None]] = None,
     ) -> bool:
         """
         启动插件HTTP服务（子进程）。
@@ -77,7 +77,7 @@ class PluginManager:
         Args:
             plugin_name: 插件名称
             wait_timeout: 等待健康检查的超时时间（秒）
-            env: 附加环境变量（叠加在当前进程环境之上，如 agent 插件的 LLM 配置）
+            env: 环境变量覆盖；值为 None 时从子进程环境删除该键。
 
         Returns:
             True 表示启动成功，False 表示失败
@@ -112,9 +112,14 @@ class PluginManager:
         try:
             logger.info("启动插件: %s (端口 %d)", plugin_name, plugin.service.port)
             proc_env = None
-            if env:
+            if env is not None:
                 import os
-                proc_env = {**os.environ, **env}
+                proc_env = dict(os.environ)
+                for key, value in env.items():
+                    if value is None:
+                        proc_env.pop(key, None)
+                    else:
+                        proc_env[key] = value
             # 子进程输出落日志文件（不能用 PIPE：无人读取时缓冲区写满会
             # 阻塞子进程 —— Genie 模型加载日志量大，曾导致插件整体卡死）
             log_dir = self.plugin_dir / ".logs"

@@ -91,6 +91,7 @@ class PiSidecarAgentEngine(AgentBase):
                     system_prompt=system_prompt,
                     request_id=request_id,
                     options=self._build_options(**kwargs),
+                    tool_context=kwargs.get("tool_context"),
                 )
                 return {
                     "reply": result.get("content", ""),
@@ -115,6 +116,7 @@ class PiSidecarAgentEngine(AgentBase):
                     system_prompt=system_prompt,
                     request_id=request_id,
                     options=self._build_options(**kwargs),
+                    tool_context=kwargs.get("tool_context"),
                 ):
                     yield event
             finally:

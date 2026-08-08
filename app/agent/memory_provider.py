@@ -41,9 +41,10 @@ class MemoryProvider(Protocol):
 class ConversationStoreMemory:
     """短期记忆适配器 — 包装现有 ConversationStore（每会话一实例）"""
 
-    def __init__(self, conversation_id: str):
+    def __init__(self, conversation_id: str, role_name_en: Optional[str] = None):
         self.conversation_id = conversation_id
-        self._store = get_conversation_store()
+        self.role_name_en = role_name_en
+        self._store = get_conversation_store(role_name_en)
 
     def add_user_message(self, text: str) -> Optional[object]:
         """写入用户消息；会话不存在时返回 None（与 store 行为一致）"""

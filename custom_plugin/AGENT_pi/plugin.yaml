@@ -1,0 +1,23 @@
+name: "AGENT_pi"
+version: "0.1.0"
+type: "agent"
+description: "pi-agent-core 代理引擎 sidecar（无状态，记忆由后端管理）"
+author: "CompanionHeart"
+repository: "https://github.com/earendil-works/pi"
+
+service:
+  port: 8300
+  health_check: "/health"
+  protocol: "http"
+  # 运行时命令（PluginManager 扩展字段；缺省回退 python server.py）
+  command: ["node", "--experimental-strip-types", "src/server.ts"]
+
+api:
+  chat: "/chat"
+  chat_stream: "/chat/stream"
+  info: "/info"
+  abort: "/abort"
+
+dependencies:
+  - "@earendil-works/pi-agent-core@0.82.1"
+  - "@earendil-works/pi-ai@0.82.1"

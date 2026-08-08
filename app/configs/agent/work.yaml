@@ -1,0 +1,5 @@
+# 独立工作 Agent sidecar。当前基础阶段生产工具白名单为空；正式工具需逐项审批。
+enabled: true
+plugin_name: "AGENT_work"
+base_url: "http://localhost:8310"
+timeout: 620

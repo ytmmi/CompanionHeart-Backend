@@ -17,6 +17,10 @@ from app.api.agent import router as agent_router
 from app.api.asr import router as asr_router
 from app.api.weather import router as weather_router
 from app.api.conversations import router as conversations_router
+from app.api.memory import router as memory_router
+from app.api.work import notifications_router as work_notifications_router
+from app.api.work import router as work_router
+from app.api.developer import router as developer_router
 from app.plugins.manager import PluginManager
 
 # ── 日志配置 ──
@@ -52,6 +56,10 @@ app.include_router(agent_router)
 app.include_router(asr_router)
 app.include_router(weather_router)
 app.include_router(conversations_router)
+app.include_router(memory_router)
+app.include_router(work_router)
+app.include_router(work_notifications_router)
+app.include_router(developer_router)
 
 
 # ── 健康检查 ──
@@ -97,8 +105,25 @@ def initialize_plugins():
         plugin = _plugin_manager.get_plugin(plugin_name)
         if plugin:
             logger.info("启动插件: %s", plugin_name)
-            # agent 插件需要注入 LLM 配置环境变量（配置单一真源: configs/llm/config.yaml）
-            env = _build_agent_sidecar_env() if plugin.type == "agent" else None
+            # Agent 需要注入 LLM 配置；MEMORY_omni 只接收固定标准记忆数据根。
+            if plugin.name == "AGENT_work":
+                # 工作 sidecar 当前不需要这些跨域凭据/回调；显式从继承环境剥离。
+                env = {
+                    "WORK_AGENT_ENABLE_TEST_TOOLS": "0",
+                    "MEMORY_DATA_ROOT": None,
+                    "MEMORY_NAMESPACE_SECRET": None,
+                    "COMPANIONHEART_DEVELOPER_KEY": None,
+                    "LLM_API_KEY": None,
+                    "LLM_BASE_URL": None,
+                    "WORK_DELEGATE_URL": None,
+                    "DEVELOPER_MEMORY_QUERY_URL": None,
+                }
+            elif plugin.type == "agent":
+                env = _build_agent_sidecar_env()
+            elif plugin.type == "memory":
+                env = _build_memory_plugin_env()
+            else:
+                env = None
             # ASR 插件模型较重（后台加载仍需时间），放宽健康检查等待；插件侧已改为
             # 后台加载模型，/health 会立即就绪，此超时仅为慢机器的防御性余量
             wait_timeout = 60 if plugin.type == "asr" else 10
@@ -119,6 +144,7 @@ def _build_agent_sidecar_env() -> dict:
         mode=ollama                     → LLM_PROVIDER=custom + <base_url>/v1
         mode=anthropic                  → LLM_PROVIDER=anthropic（pi 内置 provider）
     """
+    import os
     import yaml
 
     llm_config_path = Path(__file__).parent / "configs" / "llm" / "config.yaml"
@@ -136,6 +162,13 @@ def _build_agent_sidecar_env() -> dict:
         "LLM_MODEL": conf.get("model", ""),
         "LLM_API_KEY": conf.get("api_key", ""),
         "LLM_TIMEOUT": str(conf.get("timeout", 60)),
+        "WORK_DELEGATE_URL": os.environ.get(
+            "WORK_DELEGATE_URL", "http://127.0.0.1:18000/api/work/jobs"
+        ),
+        "DEVELOPER_MEMORY_QUERY_URL": os.environ.get(
+            "DEVELOPER_MEMORY_QUERY_URL",
+            "http://127.0.0.1:18000/api/developer/memory/query",
+        ),
     }
 
     if mode == "anthropic":
@@ -153,6 +186,16 @@ def _build_agent_sidecar_env() -> dict:
         env["LLM_BASE_URL"] = base_url
 
     return env
+
+
+def _build_memory_plugin_env() -> dict[str, str]:
+    """为记忆插件注入唯一标准记忆文件根。
+
+    该路径不从普通配置或客户端请求读取，避免插件把记忆写到项目外部。
+    """
+    data_root = (Path(__file__).parent / "memory" / "data_memory").resolve()
+    data_root.mkdir(parents=True, exist_ok=True)
+    return {"MEMORY_DATA_ROOT": str(data_root)}
 
 
 def _get_enabled_plugins() -> list[str]:
@@ -203,7 +246,28 @@ def _get_enabled_plugins() -> list[str]:
                 if plugin_name:
                     enabled.append(plugin_name)
 
-    return enabled
+    # 检查独立工作 Agent 配置。与陪伴 Agent 分进程、分工具白名单。
+    work_agent_config_path = Path(__file__).parent / "configs" / "agent" / "work.yaml"
+    if work_agent_config_path.exists():
+        with open(work_agent_config_path, "r", encoding="utf-8") as f:
+            work_agent_config = yaml.safe_load(f) or {}
+            if work_agent_config.get("enabled", False):
+                plugin_name = work_agent_config.get("plugin_name")
+                if plugin_name:
+                    enabled.append(plugin_name)
+
+    # 检查生活长期记忆配置。分类、加工、索引和检索全部在插件进程完成。
+    memory_config_path = Path(__file__).parent / "configs" / "memory" / "config.yaml"
+    if memory_config_path.exists():
+        with open(memory_config_path, "r", encoding="utf-8") as f:
+            memory_config = yaml.safe_load(f) or {}
+            if memory_config.get("enabled", False):
+                mode = memory_config.get("mode", "omni_plugin")
+                plugin_name = memory_config.get(mode, {}).get("plugin_name")
+                if plugin_name:
+                    enabled.append(plugin_name)
+
+    return list(dict.fromkeys(enabled))
 
 
 def shutdown_plugins():

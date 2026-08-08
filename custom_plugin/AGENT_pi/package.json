@@ -1,0 +1,22 @@
+{
+  "name": "companionheart-agent-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CompanionHeart agent sidecar built on pi-agent-core (stateless HTTP service)",
+  "scripts": {
+    "build": "esbuild src/server.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/server.js --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "start": "node dist/server.js",
+    "dev": "npx tsx src/server.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.82.1",
+    "@earendil-works/pi-ai": "0.82.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.5",
+    "tsx": "4.19.4",
+    "typescript": "5.8.3",
+    "@types/node": "22.15.21"
+  }
+}

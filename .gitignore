@@ -41,6 +41,8 @@ tests/
 
 # ==================== 数据目录 ====================
 data/
+app/memory/data_memory/
+app/memory/temp_memory/
 
 # ==================== ONNX / AI 模型文件 ====================
 *.onnx
@@ -87,8 +89,23 @@ app/models/
 CharacterModels/
 
 # ==================== 插件目录 ====================
-# 每个插件是独立仓库（通过插件系统从 Git 安装），整个目录不提交
-custom_plugin/
+# 默认 Agent 与记忆插件纳入版本控制；其余本地插件仍保持忽略。
+custom_plugin/*
+!custom_plugin/AGENT_work/
+!custom_plugin/AGENT_work/**
+!custom_plugin/AGENT_pi/
+!custom_plugin/AGENT_pi/**
+!custom_plugin/MEMORY_omni/
+!custom_plugin/MEMORY_omni/**
+
+# 默认插件的本地依赖、缓存与运行产物不提交。
+custom_plugin/AGENT_pi/node_modules/
+custom_plugin/AGENT_work/**/__pycache__/
+custom_plugin/AGENT_pi/**/__pycache__/
+custom_plugin/MEMORY_omni/**/__pycache__/
+custom_plugin/AGENT_work/**/*.py[cod]
+custom_plugin/AGENT_pi/**/*.py[cod]
+custom_plugin/MEMORY_omni/**/*.py[cod]
 
 # ==================== 操作系统 ====================
 *.dll

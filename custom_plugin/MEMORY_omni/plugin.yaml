@@ -1,0 +1,22 @@
+name: "MEMORY_omni"
+version: "0.1.0"
+type: "memory"
+description: "OmniMemoryOrchestrator 的 CompanionHeart 插件化移植（文本长期记忆基线）"
+author: "CompanionHeart"
+repository: "https://github.com/aiming-lab/SimpleMem"
+# 当前移植基线对应的上游 Omni-SimpleMem 快照
+upstream_commit: "db80b6a7c591e0ea730a058e9f5fc4eb06572299"
+
+service:
+  port: 8500
+  health_check: "/health"
+  protocol: "http"
+
+api:
+  memory_upsert: "/v1/memories/text"
+  memory_query: "/v1/memories/query"
+  memory_delete: "/v1/memories/{memory_id}"
+  memory_scope_delete: "/v1/scopes/{role_name_en}/{user_namespace}"
+
+# 插件与后端共用 CompanionHeart-Backend/.venv，不创建插件专用环境。
+dependencies: []
