@@ -13,7 +13,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.tts import router as tts_router
-from app.api.llm import router as llm_router
 from app.api.agent import router as agent_router
 from app.api.asr import router as asr_router
 from app.api.weather import router as weather_router
@@ -49,7 +48,6 @@ app.add_middleware(
 
 # ── 注册路由 ──
 app.include_router(tts_router)
-app.include_router(llm_router)
 app.include_router(agent_router)
 app.include_router(asr_router)
 app.include_router(weather_router)
@@ -115,10 +113,11 @@ def initialize_plugins():
 def _build_agent_sidecar_env() -> dict:
     """把 LLM 配置翻译为 agent sidecar 的环境变量（key 不落盘、不进 argv）
 
-    映射规则:
+    映射规则（LLM 配置仅支持 openai / ollama / anthropic 三种格式）:
         mode=openai 且官方 DeepSeek 端点 → LLM_PROVIDER=deepseek（pi 内置 provider）
         mode=openai 自定义端点          → LLM_PROVIDER=custom + LLM_BASE_URL
         mode=ollama                     → LLM_PROVIDER=custom + <base_url>/v1
+        mode=anthropic                  → LLM_PROVIDER=anthropic（pi 内置 provider）
     """
     import yaml
 
@@ -131,7 +130,7 @@ def _build_agent_sidecar_env() -> dict:
         llm_config = yaml.safe_load(f)
 
     mode = llm_config.get("mode", "openai")
-    conf = llm_config.get(mode, {})
+    conf = llm_config.get(mode, {}) or {}
     base_url = (conf.get("base_url") or "").rstrip("/")
     env = {
         "LLM_MODEL": conf.get("model", ""),
@@ -139,7 +138,12 @@ def _build_agent_sidecar_env() -> dict:
         "LLM_TIMEOUT": str(conf.get("timeout", 60)),
     }
 
-    if mode == "openai" and base_url in ("https://api.deepseek.com", "https://api.deepseek.com/v1"):
+    if mode == "anthropic":
+        env["LLM_PROVIDER"] = "anthropic"
+        # 仅在指向非官方端点（代理/中转）时下发 base_url
+        if base_url and base_url != "https://api.anthropic.com":
+            env["LLM_BASE_URL"] = base_url
+    elif mode == "openai" and base_url in ("https://api.deepseek.com", "https://api.deepseek.com/v1"):
         env["LLM_PROVIDER"] = "deepseek"
     elif mode == "ollama":
         env["LLM_PROVIDER"] = "custom"

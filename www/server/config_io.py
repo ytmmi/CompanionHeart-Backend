@@ -127,7 +127,7 @@ def _sync_plugin_ports(module: str, flat: dict) -> list[str]:
 def get_llm_port() -> dict:
     llm = read_yaml(CONFIG_PATHS["llm"])
     result = {}
-    for mode in ("ollama", "openai", "claude"):
+    for mode in ("ollama", "openai", "anthropic"):
         conf = llm.get(mode, {}) or {}
         base_url = conf.get("base_url", "")
         result[mode] = {

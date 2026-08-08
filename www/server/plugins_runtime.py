@@ -38,7 +38,12 @@ def _build_agent_env() -> dict:
         "LLM_API_KEY": str(conf.get("api_key", "")),
         "LLM_TIMEOUT": str(conf.get("timeout", 60)),
     }
-    if mode == "openai" and base_url in ("https://api.deepseek.com", "https://api.deepseek.com/v1"):
+    if mode == "anthropic":
+        env["LLM_PROVIDER"] = "anthropic"
+        # 仅在指向非官方端点（代理/中转）时下发 base_url
+        if base_url and base_url != "https://api.anthropic.com":
+            env["LLM_BASE_URL"] = base_url
+    elif mode == "openai" and base_url in ("https://api.deepseek.com", "https://api.deepseek.com/v1"):
         env["LLM_PROVIDER"] = "deepseek"
     elif mode == "ollama":
         env["LLM_PROVIDER"] = "custom"

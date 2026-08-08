@@ -126,8 +126,8 @@ $env:GENIE_DATA_DIR = "E:\CompanionHeart\CompanionHeart-Backend\app\models\tts\G
 | 组件 | 职责 | 通信方式 |
 |------|------|---------|
 | `app/tts/edge_tts/` | 在线Edge-TTS | 直接调用 |
-| `app/llm/openai_llm/` | 在线OpenAI API | HTTP API |
-| `app/llm/ollama/` | Ollama客户端 | HTTP API |
+| `app/agent/llm/openai_llm/` | 在线OpenAI API | HTTP API |
+| `app/agent/llm/ollama/` | Ollama客户端 | HTTP API |
 | `custom_plugin/TTS_genie_tts/` | 本地Genie-TTS | HTTP (独立进程) |
 
 ### 通信流程
@@ -159,8 +159,8 @@ GenieTTS引擎 (engine.py)
 ## 🚀 下一步（可选）
 
 ### 1. LLM插件支持
-- [ ] 创建 `app/llm/plugin_client.py`
-- [ ] 修改 `app/llm/factories.py` 支持plugin模式
+- [ ] 创建 `app/agent/llm/plugin_client.py`
+- [ ] 修改 `app/agent/llm/factories.py` 支持plugin模式
 - [ ] 创建示例LLM插件（如本地模型推理）
 
 ### 2. 插件热重载

@@ -12,7 +12,7 @@
 | 模块         | 状态    | 说明                                                                 |
 | ------------ | ------- | -------------------------------------------------------------------- |
 | Agent 代理   | ✅      | [pi](https://github.com/earendil-works/pi) 代理引擎（工具调用 + agent loop），Node sidecar 无状态服务；记忆由后端管理 |
-| LLM 对话     | ✅      | OpenAI 兼容 / Ollama / DeepSeek / Claude / Gemini 多引擎，流式 + 非流式 |
+| LLM 对话     | ✅      | OpenAI 兼容（含 DeepSeek）/ Ollama / Anthropic 三种格式，流式 + 非流式 |
 | TTS 语音合成 | ✅      | EdgeTTS（在线）/ GenieTTS（本地 ONNX）/ 插件模式，非流式 + 流式 + 句子级同步流式 |
 | TTS 启用开关 | ✅      | 前端控制 `/api/voice/tts/enabled`，禁用时合成端点 403 不路由引擎     |
 | ASR 语音识别 | ✅      | FunASR + SenseVoiceSmall（本地 CPU 推理，多语言），**情感/事件作为独立信号**；暂未接入 API 层 |
@@ -21,8 +21,8 @@
 | 长期记忆     | 📋 待开发 | `MemoryProvider` 协议已就位，实现同协议即插即用                    |
 | MCP / Live2D | 📋 待开发 | MCP 工具接入、Live2D 动作驱动                                      |
 
-> **路由收敛计划**：`/api/agent/*` 与 `/api/llm/*` 过渡期并存（SSE 格式完全兼容），
-> Agent 稳定后将收敛掉 `/api/llm/*`。前端默认已走 `/api/agent/*`。
+> **路由收敛已完成**：`/api/llm/*` 已下线，对话统一走 `/api/agent/*`。
+> LLM 引擎迁入 `app/agent/llm/`，仅保留 **OpenAI 兼容 / Ollama / Anthropic** 三种格式。
 
 ---
 
@@ -99,14 +99,10 @@ curl http://127.0.0.1:18000/api/agent/status
 | GET  | `/api/agent/status`               | Agent 引擎状态（sidecar 健康度/模型/工具/能力标志） |
 | GET  | `/api/agent/tools`                | Agent 可用工具列表                       |
 | POST | `/api/agent/chat`                 | Agent 非流式对话（回复 + 工具调用摘要）  |
-| POST | `/api/agent/chat/stream`          | Agent 流式对话（SSE，与 `/api/llm/chat/stream` 格式兼容） |
+| POST | `/api/agent/chat/stream`          | Agent 流式对话（SSE）                    |
 | POST | `/api/agent/chat/stream/sentences`| Agent 句子级流式（NDJSON，文本+TTS 音频成对） |
 | POST | `/api/agent/abort`                | 中断进行中的 Agent 对话                  |
 | POST | `/api/agent/restart`              | 重启 Agent sidecar 子进程                |
-| GET  | `/api/llm/models`                 | 可用模型列表                             |
-| GET  | `/api/llm/status`                 | LLM 引擎状态                             |
-| POST | `/api/llm/chat`                   | 非流式对话（无状态 / 会话两种模式）      |
-| POST | `/api/llm/chat/stream`            | 流式对话（SSE）                          |
 | GET  | `/api/voice/tts/voices`           | 语音/角色列表                            |
 | GET  | `/api/voice/tts/status`           | TTS 引擎状态                             |
 | GET  | `/api/voice/tts/enabled`          | 查询 TTS 是否启用                        |
@@ -128,9 +124,9 @@ curl http://127.0.0.1:18000/api/agent/status
 CompanionHeart-Backend/
 ├── app/
 │   ├── main.py            # FastAPI 入口（CORS、路由注册、插件生命周期、sidecar env 注入）
-│   ├── api/               # API 路由层（agent / llm / tts / conversations）
+│   ├── api/               # API 路由层（agent / tts / asr / conversations）
 │   ├── agent/             # Agent 引擎（base + factories + memory_provider + pi_sidecar/）
-│   ├── llm/               # LLM 引擎（base + factories + 各引擎实现）
+│   │   └── llm/           #   LLM 推理底座（base + factories + openai_llm / ollama / anthropic）
 │   ├── tts/               # TTS 引擎（EdgeTTS / GenieTTS / 插件客户端）
 │   ├── asr/               # ASR 引擎（base + factories + 插件客户端，情感信号）
 │   ├── memory/            # 会话存储（short_term：JSON 文件持久化）
@@ -167,7 +163,7 @@ CompanionHeart-Backend/
 
 - 前端聊天管线：`POST /api/agent/chat` → `POST /api/voice/tts/stream/sentences`（句子级同步，引擎不支持时回退 `/api/voice/tts`）
   - 也可一步到位用 `POST /api/agent/chat/stream/sentences`（后端内部完成分句 + TTS，文本与音频成对流出）
-- 对话引擎切换：前端 `VITE_CHAT_ENGINE`（`agent` 默认 / `llm` 回退），两者 SSE 格式兼容
+- 对话引擎：统一走 `/api/agent/*`（`/api/llm/*` 已下线，不再有回退路径）
 - TTS 开关：前端以 localStorage 持久化为准，启动时 `POST /api/voice/tts/enabled` 同步（后端开关为进程内状态，重启复位）
 - 前端可用 `VITE_API_BASE_URL` 覆盖后端地址（默认 `http://127.0.0.1:18000`）
 

@@ -4,21 +4,20 @@
     GET    /api/agent/status         — Agent 引擎状态（sidecar health/info 透传）
     GET    /api/agent/tools          — 可用工具列表
     POST   /api/agent/chat           — 非流式对话（完整回复 + 工具调用摘要）
-    POST   /api/agent/chat/stream    — 流式对话（SSE，与 /api/llm/chat/stream 格式兼容）
+    POST   /api/agent/chat/stream    — 流式对话（SSE）
     POST   /api/agent/chat/stream/sentences — 句子级流式（NDJSON，文本+TTS 音频成对到达）
     POST   /api/agent/abort          — 中断进行中的对话
 
-对话模式（与 /api/llm 同构，二选一）:
+对话模式（二选一）:
     - 无状态模式: 传 messages，多轮上下文由调用方维护
     - 会话模式:   传 conversation_id + text，上下文由后端短期记忆组装，
                 用户消息与回复自动持久化（记忆唯一真源在 Python 侧，
                 sidecar 完全无状态 —— 记忆与 pi 分离的核心保证）
 
-SSE 兼容性:
-    chat/stream 的输出格式与 /api/llm/chat/stream 完全兼容
-    （data: {"content": ...} + data: [DONE]），前端零改动即可切换；
-    工具事件作为附加 key（"tool"）出现，旧前端忽略即可。
-    —— 为「agent 稳定后收敛 /api/llm 路由」铺路。
+SSE 输出格式:
+    data: {"content": ...} 逐块下发，末尾 data: [DONE]；
+    工具事件作为附加 key（"tool"）出现，不消费的前端忽略即可。
+    —— 旧 /api/llm 路由已下线，对话统一收敛至本路由。
 """
 
 import json
@@ -50,7 +49,7 @@ class Message(BaseModel):
 
 
 class AgentChatRequest(BaseModel):
-    """对话请求 — 两种模式（二选一），与 /api/llm 的 ChatRequest 同构"""
+    """对话请求 — 两种模式（二选一）"""
     messages: Optional[list[Message]] = Field(
         None, min_length=1, max_length=100,
         description="无状态模式：对话消息列表（支持多轮上下文）",
@@ -172,7 +171,7 @@ async def _ensure_sidecar(engine: AgentBase) -> None:
     raise HTTPException(status_code=503, detail="agent sidecar 不可用（自动重启失败）")
 
 
-# ── 消息解析（与 /api/llm 的 _resolve_messages/_save_reply 同逻辑） ──
+# ── 消息解析 ──
 
 def _resolve_messages(request: AgentChatRequest) -> list[dict]:
     """
@@ -298,7 +297,7 @@ async def chat_stream(
     """
     流式对话 — SSE (text/event-stream) 逐 chunk 返回。
 
-    格式与 /api/llm/chat/stream 兼容:
+    SSE 格式:
         文本增量: `data: {"content": "...", "engine": "pi_sidecar"}`
         工具事件: `data: {"tool": {"name": ..., "phase": "start"|"end"}}`（附加 key）
         结束标志: `data: [DONE]`

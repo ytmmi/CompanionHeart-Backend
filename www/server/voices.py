@@ -98,7 +98,7 @@ def edge_voice_catalog() -> list[dict]:
 
 
 def get_llm_models(mode: str) -> dict:
-    """拉模型列表：ollama 走 /api/tags，openai 兼容走 /v1/models，Claude 走预置列表"""
+    """拉模型列表：ollama 走 /api/tags，openai 兼容走 /v1/models，anthropic 走 /v1/models（x-api-key）"""
     llm = read_yaml(CONFIG_PATHS["llm"])
 
     if mode == "ollama":
@@ -113,16 +113,28 @@ def get_llm_models(mode: str) -> dict:
             return {"ok": False, "models": [], "error": str(e)}
         return {"ok": True, "models": sorted(models)}
 
-    if mode == "claude":
-        # Anthropic 没有公开模型列表 API，返回预设的当前模型列表
+    if mode == "anthropic":
+        # Anthropic Models API: GET /v1/models（需 x-api-key + anthropic-version）
+        base = str(dig(llm, "anthropic.base_url", "")).rstrip("/") or "https://api.anthropic.com"
+        key = str(dig(llm, "anthropic.api_key", ""))
+        if key:
+            code, text, err = http_request(
+                "GET", f"{base}/v1/models?limit=100", timeout=10,
+                headers={"x-api-key": key, "anthropic-version": "2023-06-01"},
+            )
+            if not err and code == 200:
+                try:
+                    models = [m["id"] for m in json.loads(text).get("data", [])
+                              if isinstance(m, dict) and "id" in m]
+                    if models:
+                        return {"ok": True, "models": models}
+                except Exception:
+                    pass  # 解析失败则回退预设列表
         return {"ok": True, "models": [
-            "claude-opus-4-20250514",
-            "claude-sonnet-4-20250514",
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-haiku-20241022",
-            "claude-3-opus-20240229",
-            "claude-3-haiku-20240307",
-        ], "hint": "Anthropic 无模型列表 API，此为预设列表"}
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5",
+        ], "hint": "未能从 Anthropic 拉取模型列表（检查密钥），此为预设列表"}
 
     base = str(dig(llm, "openai.base_url", "")).rstrip("/")
     key = str(dig(llm, "openai.api_key", ""))

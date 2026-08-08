@@ -1,7 +1,11 @@
-"""Anthropic Claude LLM 引擎 — 通过 Messages API 调用
+"""Anthropic 格式 LLM 引擎 — 通过 Messages API 调用
+
+支持所有实现 Anthropic Messages API 格式的服务:
+    - Anthropic 官方 API（Claude 系列）
+    - 任何兼容 /v1/messages 格式的代理/中转服务
 
 API 文档:
-    https://docs.anthropic.com/en/api/messages
+    https://platform.claude.com/docs/en/api/messages
 
 与 OpenAI Chat Completions 的关键差异:
     - system 消息通过请求体的 `system` 字段传入（不在 messages 中）
@@ -17,13 +21,13 @@ import httpx
 from ..base import LLMBase
 
 
-class ClaudeLLM(LLMBase):
-    """Anthropic Claude LLM 引擎 — Messages API"""
+class AnthropicLLM(LLMBase):
+    """Anthropic 格式 LLM 引擎 — Messages API"""
 
     def __init__(
         self,
         api_key: str,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = "claude-sonnet-4-6",
         base_url: str = "https://api.anthropic.com",
         timeout: int = 120,
         system_prompt: str = "",
@@ -31,8 +35,8 @@ class ClaudeLLM(LLMBase):
     ):
         """
         Args:
-            api_key:        Anthropic API Key（sk-...）。
-            model:          模型 ID，默认 claude-sonnet-4-20250514。
+            api_key:        Anthropic API Key（sk-ant-...）。
+            model:          模型 ID，默认 claude-sonnet-4-6。
             base_url:       API 基础地址（可覆盖为代理/中转服务）。
             timeout:        请求超时（秒）。
             system_prompt:  系统提示词。

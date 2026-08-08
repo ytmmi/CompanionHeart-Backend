@@ -8,7 +8,7 @@
     DELETE /api/conversations/{id}   — 删除对话
 
 存储由 app.memory.short_term.ConversationStore 提供（JSON 文件持久化）。
-对话消息的写入发生在 /api/llm/chat 携带 conversation_id 调用时（后端自动
+对话消息的写入发生在 /api/agent/chat 携带 conversation_id 调用时（后端自动
 追加用户消息与模型回复），本模块只做会话生命周期管理。
 """
 
